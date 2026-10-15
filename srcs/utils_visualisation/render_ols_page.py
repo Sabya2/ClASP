@@ -1,0 +1,1197 @@
+"""Univariate and multivariable OLS analysis UI."""
+
+import re
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import statsmodels.formula.api as smf
+import streamlit as st
+
+from srcs.utils_visualisation.common import (
+    _candidate_group_columns,
+    _corr_pair,
+    get_figure_download,
+    p_to_star,
+    set_paper_plot_style,
+    stars,
+)
+
+
+
+# ---------------------------------------------------------------------
+# Expected project helpers
+# ---------------------------------------------------------------------
+# This page reuses the following helpers from your existing application:
+# - set_paper_plot_style(show_grid=...)
+# - get_plot_palette(groups, mode=...)
+# - get_figure_download(fig)
+# - p_to_star(p)
+# - _candidate_group_columns(df, group_col)
+#
+# If they live in another module, import them at the top of this file.
+
+
+
+def _safe_numeric_series(data, column):
+    """Return a numeric, finite version of a dataframe column."""
+    return pd.to_numeric(data[column], errors="coerce").replace([np.inf, -np.inf], np.nan)
+
+
+def _format_pvalue(p_value):
+    """Format p-values for tables and text."""
+    if pd.isna(p_value):
+        return "NA"
+    if p_value < 0.001:
+        return "<0.001"
+    return f"{p_value:.3f}"
+
+
+def _term_to_readable(term):
+    """Convert statsmodels treatment-coded names to a readable display label."""
+    return re.sub(r"C\((.*?)\)\[T\.(.*?)\]", r"\1 = \2", str(term))
+
+
+
+def _reference_category(data, variable):
+    """Infer the treatment reference category used by patsy/statsmodels."""
+    values = data[variable].dropna().unique().tolist()
+    if not values:
+        return "NA"
+    try:
+        return sorted(values)[0]
+    except TypeError:
+        return sorted(map(str, values))[0]
+
+
+
+
+def _fit_ols_model(data, outcome, predictors, primary_predictors, categorical_vars, robust_se=False):
+    """Fit one OLS model, returning the fitted model and formula."""
+    formula_terms = []
+
+    for var in predictors:
+        if var in categorical_vars:
+            formula_terms.append(f"C({var})")
+        else:
+            formula_terms.append(var)
+    formula = f"{outcome} ~ " + " + ".join(formula_terms)
+    model = smf.ols(formula, data=data).fit(cov_type="HC3")
+    if robust_se:
+        model = model.get_robustcov_results(cov_type="HC3")
+    return model, formula
+
+def _model_terms_table(model):
+    """Return an OLS coefficient table excluding the intercept."""
+    ci = model.conf_int()
+    table = pd.DataFrame({
+        "term": model.params.index,
+        "beta": model.params.values,
+        "std_error": model.bse.values,
+        "t_value": model.tvalues.values,
+        "p_value": model.pvalues.values,
+        "ci_low": ci.iloc[:, 0].values,
+        "ci_high": ci.iloc[:, 1].values,
+    })
+    table = table.loc[table["term"] != "Intercept"].copy()
+    table["term_display"] = table["term"].map(_term_to_readable)
+    table["significance"] = table["p_value"].map(p_to_star)
+    return table
+
+
+def _extract_primary_coefficients(model, outcome, primary_predictors):
+    """Extract adjusted coefficients for primary predictors."""
+
+    params = model.params
+    pvalues = model.pvalues
+    conf_int = model.conf_int()
+
+    # Robust results may return NumPy arrays instead of labeled Series
+    if not hasattr(params, "index"):
+        term_names = model.model.exog_names
+        params = pd.Series(params, index=term_names)
+        pvalues = pd.Series(pvalues, index=term_names)
+        conf_int = pd.DataFrame(
+            conf_int,
+            index=term_names,
+            columns=["ci_low", "ci_high"],
+        )
+    else:
+        conf_int = conf_int.copy()
+        conf_int.columns = ["ci_low", "ci_high"]
+
+    rows = []
+
+    for predictor in primary_predictors:
+        matching_terms = [
+            term for term in params.index
+            if term == predictor or term.startswith(f"C({predictor})")
+        ]
+
+        for term in matching_terms:
+            rows.append({
+                "outcome": outcome,
+                "predictor": predictor,
+                "term": term,
+                "term_display": f"{outcome}: {term}",
+                "beta": float(params[term]),
+                "ci_low": float(conf_int.loc[term, "ci_low"]),
+                "ci_high": float(conf_int.loc[term, "ci_high"]),
+                "p_value": float(pvalues[term]),
+            })
+
+    return pd.DataFrame(rows)
+
+
+
+def _build_equation(model, outcome, categorical_vars):
+    """Build a readable fitted-regression equation with categorical terms grouped."""
+
+    intercept = float(model.params.get("Intercept", 0.0))
+
+    continuous_lines = []
+    categorical_lines = {}
+
+    for term, beta in model.params.items():
+        if term == "Intercept":
+            continue
+
+        sign = "+" if beta >= 0 else "−"
+        piece = f"{sign}{abs(beta):.3f}×({_term_to_readable(term)})"
+
+        # Check whether this term belongs to a categorical variable
+        matched_category = None
+
+        for cat_var in categorical_vars:
+            if term.startswith(f"C({cat_var})") or cat_var in term:
+                matched_category = cat_var
+                break
+
+        if matched_category:
+            categorical_lines.setdefault(matched_category, []).append(piece)
+        else:
+            continuous_lines.append(piece)
+
+    # Start with intercept
+    lines = [f"{outcome} = {intercept:.3f}"]
+
+    # Add ALL continuous predictors first
+    if continuous_lines:
+        lines.append(" ".join(continuous_lines))
+
+    # Add categorical predictors afterwards,
+    # with levels of the same variable kept on one line
+    for cat_var, terms in categorical_lines.items():
+        lines.append(" ".join(terms))
+
+    return "\n".join(lines)
+
+def _coefficient_interpretation(term, beta, ci_low, ci_high, p_value, outcome,
+                                additional_covars, data):
+    """Create manuscript-style, conditional interpretation for one coefficient."""
+    readable_term = _term_to_readable(term)
+    significant_text = "statistically significant" if p_value < 0.05 else "not statistically significant"
+    direction = "higher" if beta > 0 else "lower"
+
+    categorical_match = re.match(r"C\((.*?)\)\[T\.(.*?)\]", str(term))
+    if categorical_match:
+        variable, exposed_level = categorical_match.groups()
+        reference = _reference_category(data, variable)
+        lead = (
+            f"Compared with {variable} = {reference} (reference), {variable} = {exposed_level} "
+            f"was associated with a {abs(beta):.3f}-unit {direction} {outcome}"
+        )
+    elif term in additional_covars:
+        lead = f"Compared with the reference category, {readable_term} was associated with a {abs(beta):.3f}-unit {direction} {outcome}"
+    else:
+        lead = (
+            f"For each one-unit increase in {readable_term}, {outcome} was estimated to be "
+            f"{abs(beta):.3f} units {direction}"
+        )
+
+    return (
+        f"{lead}, conditional on all other variables in the model "
+        f"(beta = {beta:.3f}, 95% CI {ci_low:.3f} to {ci_high:.3f}, "
+        f"p = {_format_pvalue(p_value)}; {significant_text})."
+    )
+
+
+def _build_model_explanation(model, outcome, predictors,
+                             additional_covars, categorical_vars, data, formula):
+    """Create structured explanatory output for an OLS model."""
+    coefficient_table = _model_terms_table(model)
+    coefficient_text = []
+
+    for _, row in coefficient_table.iterrows():
+        coefficient_text.append(
+            _coefficient_interpretation(
+                term=row["term"],
+                beta=row["beta"],
+                ci_low=row["ci_low"],
+                ci_high=row["ci_high"],
+                p_value=row["p_value"],
+                outcome=outcome,
+                additional_covars=additional_covars,
+                data=data,
+            )
+        )
+
+    significant_terms = coefficient_table.loc[coefficient_table["p_value"] < 0.05, "term_display"].tolist()
+
+    summary = {
+        "formula": formula,
+        "equation": _build_equation(model, outcome, categorical_vars),
+        "n": int(model.nobs),
+        "r_squared": float(model.rsquared),
+        "adj_r_squared": float(model.rsquared_adj),
+        "f_pvalue": float(model.f_pvalue) if pd.notna(model.f_pvalue) else np.nan,
+        "significant_terms": significant_terms,
+        "coefficient_table": coefficient_table,
+        "coefficient_text": coefficient_text,
+    }
+    return summary
+
+
+
+def _plot_univariate(
+    ax,
+    data,
+    x_col,
+    y_col,
+    group_col=None,
+    selected_groups=None,
+    add_reg=True,
+    plot_mode="multicolor",
+):
+    """Draw a univariate scatterplot, optionally stratified by group."""
+
+
+    # -----------------------------------------
+    # Prepare data
+    # -----------------------------------------
+    cols = [x_col, y_col]
+
+    if group_col:
+        cols.append(group_col)
+
+    plot_data = data[cols].copy()
+    plot_data[x_col] = _safe_numeric_series(plot_data,x_col)
+    plot_data[y_col] = _safe_numeric_series(plot_data,y_col)
+    plot_data = plot_data.dropna(subset=[x_col, y_col])
+
+    # -----------------------------------------
+    # Filter groups
+    # -----------------------------------------
+    if group_col and selected_groups:
+        plot_data = plot_data[plot_data[group_col].isin(selected_groups)].copy()
+
+    if plot_data.empty:
+        return None
+
+    # -----------------------------------------
+    # Grouped plot
+    # -----------------------------------------
+    if group_col and selected_groups:
+
+        group_order = [
+            group
+            for group in selected_groups
+            if group in plot_data[group_col].unique()
+        ]
+
+        for group in group_order:
+
+            subgroup = plot_data[plot_data[group_col] == group].copy()
+
+            if subgroup.empty:
+                continue
+
+            # Scatter
+            sns.scatterplot(
+                data=subgroup, x=x_col, y=y_col,
+                ax=ax, label=str(group), alpha=0.9, edgecolor="white", s=28,
+                )
+
+            # Regression line
+            if ( add_reg and len(subgroup) >= 2 and subgroup[x_col].nunique() > 1):
+                sns.regplot(
+                    data=subgroup, x=x_col, y=y_col,
+                    scatter=False, ax=ax, line_kws={ "linewidth": 1.3 },
+                    )
+
+        ax.legend( title=group_col, frameon=False, )
+
+    # -----------------------------------------
+    # Overall plot
+    # -----------------------------------------
+    else:
+
+        sns.scatterplot(
+            data=plot_data, x=x_col, y=y_col, ax=ax,
+            alpha=0.9, edgecolor="white", s=28,)
+
+        if (add_reg and len(plot_data) >= 2 and plot_data[x_col].nunique() > 1):
+            sns.regplot(
+                data=plot_data, x=x_col, y=y_col,
+                scatter=False, ax=ax, line_kws={"linewidth": 1.3},
+                )
+
+    return plot_data
+
+
+
+def _plot_forest_by_predictor(coefficient_table, predictor):
+    """Plot one primary predictor across all outcomes."""
+
+    plot_data = coefficient_table[coefficient_table["predictor"] == predictor].copy()
+
+    if plot_data.empty:
+        return None
+
+    plot_data = plot_data.sort_values(["outcome", "term"]).reset_index(drop=True)
+
+    fig_height = max(1.8, 0.65 * len(plot_data) + 1.8)
+    fig, ax = plt.subplots(figsize=(8.5, fig_height))
+
+    for idx, row in plot_data.iterrows():
+        color = ("#7CB218" if row["p_value"] < 0.05 else "#AF5D5D")
+        ax.errorbar(
+            x=row["beta"], y=idx,
+            xerr=[[row["beta"] - row["ci_low"]], [row["ci_high"] - row["beta"]]],
+            fmt="o", color=color, capsize=3, linewidth=1.5, markersize=8,
+        )
+
+    ax.axvline(0,color="black",linestyle="--",linewidth=1)
+    ax.set_yticks(range(len(plot_data)))
+    ax.set_yticklabels(plot_data["term_display"])
+    ax.set_yticklabels(plot_data["outcome"])
+    ax.set_xlabel(f"Adjusted beta coefficient (95% CI) of {predictor} for each outcome")
+    ax.set_title(f"Forest Plot: Primary predictor [{predictor}] across each outcome")
+    ax.grid(axis="x", alpha=0.25)
+
+    for idx, row in plot_data.iterrows():
+        p = f"p = {row['p_value']:.3f} {stars(row['p_value'])}"
+        ax.text( 1.02, idx, p,
+            transform=ax.get_yaxis_transform(),
+            color = ("#75B302" if row["p_value"] < 0.05 else "#AF5D5D"),
+            clip_on=False, va="center", ha="left", fontsize=8
+            )
+    fig.tight_layout()
+
+    return fig
+
+
+def _plot_beta_heatmap(explanations, outcomes, predictors):
+    """Create an outcome-by-predictor heatmap of beta estimates.
+    For categorical predictors, each contrast is shown as an individual column.
+    """
+    rows = []
+    for outcome in outcomes:
+        coef_table = explanations[outcome]["coefficient_table"].copy()
+        for _, row in coef_table.iterrows():
+            rows.append({
+                "outcome": outcome,
+                "term": row["term_display"],
+                "beta": row["beta"],
+                "p_value": row["p_value"],
+            })
+
+    long_data = pd.DataFrame(rows)
+    if long_data.empty:
+        return None, pd.DataFrame()
+
+    beta_matrix = long_data.pivot(index="outcome", columns="term", values="beta")
+    beta_matrix = beta_matrix.reindex(index=outcomes)
+
+    annotation_matrix = long_data.copy()
+    annotation_matrix["annot"] = annotation_matrix.apply(
+        lambda row: f"{row['beta']:.2f}{stars(row['p_value'])}", axis=1
+    )
+    annotation_matrix = annotation_matrix.pivot(index="outcome", columns="term", values="annot")
+    annotation_matrix = annotation_matrix.reindex(index=outcomes, columns=beta_matrix.columns)
+
+    finite_values = beta_matrix.to_numpy(dtype=float)
+    finite_values = finite_values[np.isfinite(finite_values)]
+    if len(finite_values) == 0:
+        return None, beta_matrix
+
+    max_abs = max(abs(finite_values.min()), abs(finite_values.max()))
+    if max_abs == 0:
+        max_abs = 1.0
+
+    fig_width = max(8, 1.35 * len(beta_matrix.columns) + 2)
+    fig_height = max(3.5, 0.9 * len(beta_matrix.index) + 2)
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
+    sns.heatmap(
+        beta_matrix,
+        annot=annotation_matrix,
+        fmt="",
+        cmap="RdBu_r",
+        center=0,
+        vmin=-max_abs,
+        vmax=max_abs,
+        linewidths=0.5,
+        linecolor="white",
+        cbar_kws={"label": "Adjusted beta coefficient"},
+        ax=ax,
+    )
+    ax.set_title("Adjusted OLS beta coefficients")
+    ax.set_xlabel("Predictors / categorical contrasts")
+    ax.set_ylabel("Outcomes")
+    plt.xticks(rotation=35, ha="right")
+    fig.tight_layout()
+    return fig, beta_matrix
+
+
+
+def _render_explanation(explanation, outcome, analysis_mode="Multivariable OLS"):
+    """
+    Render equation, model fit, table, and interpretation in Streamlit.
+
+    Uses horizontal side-by-side expanders for coefficients and interpretation
+    to create a more compact, genie-like effect.
+    """
+    st.markdown("#### Model equation")
+    st.code(explanation["equation"], wrap_lines = True, language=None)
+    st.caption(
+        "The equation is a fitted conditional mean model. For categorical variables, "
+        "the displayed coefficient corresponds to the treatment-coded contrast against its reference level."
+    )
+
+    metric_1, metric_2, metric_3, metric_4 = st.columns(4)
+    metric_1.metric("N", explanation["n"])
+    metric_2.metric("R\u00B2", f"{explanation['r_squared']:.3f}")
+    metric_3.metric("Adjusted R\u00B2", f"{explanation['adj_r_squared']:.3f}")
+    metric_4.metric("Model p", _format_pvalue(explanation["f_pvalue"]))
+
+    # -------------------------------------------------
+    # Horizontal expanders (side-by-side)
+    # -------------------------------------------------
+    col_coeff, col_interp = st.columns([1, 1], gap="small")
+
+    with col_coeff:
+        with st.expander("\U0001F4CA Coefficients table", expanded=False):
+            st.markdown("##### Coefficients")
+            coefficient_table = explanation["coefficient_table"].copy()
+            display_table = coefficient_table[[
+                "term_display", "beta", "std_error", "ci_low", "ci_high", "p_value", "significance"
+            ]].rename(columns={
+                "term_display": "Term",
+                "beta": "Beta",
+                "std_error": "SE",
+                "ci_low": "95% CI low",
+                "ci_high": "95% CI high",
+                "p_value": "p-value",
+                "significance": "Sig.",
+            })
+            st.dataframe(
+                display_table.style.format({
+                    "Beta": "{:.3f}",
+                    "SE": "{:.3f}",
+                    "95% CI low": "{:.3f}",
+                    "95% CI high": "{:.3f}",
+                    "p-value": "{:.4f}",
+                }),
+                width="stretch",
+                hide_index=True,
+            )
+
+    with col_interp:
+        with st.expander("\U0001F4A1 Interpretation", expanded=False):
+            st.markdown("##### Interpretation")
+            if explanation["coefficient_text"]:
+                for sentence in explanation["coefficient_text"]:
+                    st.markdown(f"- {sentence}")
+            else:
+                st.info("No estimable coefficients were available for interpretation.")
+
+            if explanation["significant_terms"]:
+                st.success(
+                    "Statistically significant adjusted terms at alpha = 0.05: "
+                    + ", ".join(explanation["significant_terms"])
+                    + "."
+                )
+            else:
+                st.info("No adjusted terms reached p < 0.05 in this model.")
+
+
+
+    st.caption(
+        "Interpret coefficients as adjusted associations, not necessarily causal effects. "
+        "Validity also depends on the outcome scale, model specification, linearity, residual behavior, "
+        "influential observations, and multicollinearity. "
+        "**R\u00B2** (coefficient of determination) indicates the proportion of variance in the outcome explained by all predictors jointly "
+        "(e.g., R\u00B2 = 0.35 means 35% of the variability is accounted for by the model). "
+        "**Adjusted R\u00B2** penalizes R\u00B2 for the number of predictors, making it more suitable for comparing models with different numbers of variables. "
+        "**RMSE** (root mean squared error, or residual standard deviation) represents the typical prediction error in the original units of the outcome "
+        "(e.g., if the outcome is in mm, RMSE = 1.2 means predictions typically deviate from observed values by about 1.2 mm)."
+    )
+
+
+def render_ols_page(df, continuous_cols, categorical_cols, group_col):
+    """
+    Render a Streamlit page for univariate and multivariable OLS analysis.
+
+    The page follows the layout pattern of render_linear_page:
+    - variable selectors
+    - optional group handling for univariate scatter plots
+    - visual style controls
+    - plot grid / forest plot / heatmap
+    - expandable statistics and interpretation panels
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Uploaded analysis dataframe.
+    continuous_cols : list[str]
+        Numeric variables available for X/Y selection.
+    group_col : str or None
+        Default categorical grouping variable selected elsewhere in the app.
+    """
+    # -----------------------------------------------------
+    # Input checks
+    # -----------------------------------------------------
+    if df is None:
+        st.warning("Upload data first.")
+        return
+
+    if len(continuous_cols) < 2:
+        st.warning("Select at least two continuous variables in the sidebar.")
+        return
+
+    # -----------------------------------------------------
+    # Page controls
+    # -----------------------------------------------------
+
+    analysis_mode = st.pills(
+        "Analysis type",
+        options=["Univariate Analysis", "Multivariate Analysis"],
+        selection_mode="single",
+        default=None,
+        key="ols_analysis_mode",
+        help=(
+            "Univariate OLS fits one predictor at a time. Multivariable OLS "
+            "fits selected predictors jointly."
+        ),
+    )
+    st.session_state["analysis_mode"] = analysis_mode
+    plot_mode = "multicolor"
+
+    # -----------------------------------------------------
+    # Univariate OLS page
+    # -----------------------------------------------------
+    if analysis_mode == "Univariate Analysis":
+        _render_univariate_ols_section(df, continuous_cols, categorical_cols, group_col, plot_mode=plot_mode)
+        return
+
+    # -----------------------------------------------------
+    # Multivariable OLS page
+    # -----------------------------------------------------
+    if analysis_mode == "Multivariate Analysis":
+        _render_multivariable_ols_section(df, continuous_cols, categorical_cols,)
+        return
+
+
+def _render_univariate_ols_section(df, continuous_cols, categorical_cols, group_col, plot_mode):
+    """Render pairwise/univariate OLS scatterplot section."""
+    st.markdown("### Univariate OLS")
+
+    v1, v2 = st.columns([1, 1], border=True, gap="small")
+    with v1:
+        x_cols = st.multiselect("(X) Predictor variable(s)",
+            options=continuous_cols,
+            default=continuous_cols[:1],
+            key="uniols_x_multiselect",
+        )
+
+    with v2:
+        possible_y = [col for col in continuous_cols if col not in x_cols]
+        y_cols = st.multiselect("(Y) Outcome variable(s)",
+            options=possible_y,
+            key="uniols_y_multiselect",
+        )
+
+    c1, c2, c3= st.columns([1,1,4], border=False, gap="xsmall")
+
+    with c1:
+            add_reg = st.checkbox("Regression line",
+                value=True,
+                key="uniols_add_reg",
+            )
+
+            ncols = st.slider("Grid columns",
+                min_value=1,
+                max_value=5,
+                value=2,
+                key="uniols_grid_cols",
+            )
+
+
+    with c2:
+        plot_by_group = st.checkbox("Plot by group",
+            value=False,
+            key="uniols_plot_by_group",
+        )
+
+    with c3:
+        selected_groups = None
+
+        if plot_by_group:
+            plot_group_col = group_col
+            if not group_col:
+                st.warning("Select a valid group column in the sidebar first.")
+                return
+
+            possible_group_cols = _candidate_group_columns(df, group_col)
+            g1, g2 = st.columns([1.5, 2.2], gap="small", border=False)
+
+            with g1:
+                use_alt_group = st.checkbox("Use a different group variable on this page",
+                    value=False,
+                    key="uniols_use_alt_group",
+                )
+                if use_alt_group:
+                    plot_group_col = st.selectbox("Group column",
+                        options=possible_group_cols,
+                        index=possible_group_cols.index(group_col) if group_col in possible_group_cols else 0,
+                        key="uniols_group_col_selectbox",
+                    )
+
+            with g2:
+                available_groups = df[plot_group_col].dropna().unique().tolist()
+                state_key = f"uniols_selected_groups__{plot_group_col}"
+                if state_key not in st.session_state:
+                    st.session_state[state_key] = available_groups[: min(3, len(available_groups))]
+
+                st.session_state[state_key] = [
+                    group for group in st.session_state[state_key] if group in available_groups
+                ]
+
+                selected_groups = st.multiselect("Groups to plot",
+                    options=available_groups,
+                    default=st.session_state[state_key],
+                    key=f"{state_key}_widget",
+                )
+                st.session_state[state_key] = selected_groups
+
+                if not selected_groups:
+                    st.info("Select at least one group.")
+                    return
+
+    if not x_cols:
+        st.info("Select at least one X variable.")
+        return
+    if not y_cols:
+        st.info("Select at least one Y variable.")
+        return
+
+    plot_pairs = [
+        (x_col, y_col)
+        for x_col in x_cols
+        for y_col in y_cols
+    ]
+
+    st.markdown("### Linear plots")
+    set_paper_plot_style()
+
+    for row_start in range(0, len(plot_pairs), ncols):
+
+        row_pairs = plot_pairs[row_start: row_start + ncols]
+        row_layout = st.columns(ncols)
+
+        for container, (x_col, y_col) in zip(row_layout, row_pairs):
+            # sns.set_style("white")
+            with container:
+
+                fig, ax = plt.subplots(figsize=(6.0, 4.5))
+
+                # -----------------------------------------
+                # Plot
+                # -----------------------------------------
+                plot_data = _plot_univariate(
+                    ax=ax, data=df, x_col=x_col, y_col=y_col,
+                    group_col=plot_group_col if plot_by_group else None,
+                    selected_groups=selected_groups,
+                    add_reg=add_reg,
+                    plot_mode=plot_mode,
+                )
+
+                if plot_data is None or plot_data.empty:
+                    st.info(f"No valid data for {y_col} vs {x_col}.")
+                    plt.close(fig)
+                    continue
+
+                # -----------------------------------------
+                # OLS
+                # -----------------------------------------
+                try:
+
+                    model, formula = _fit_ols_model(
+                        data=plot_data,
+                        outcome=y_col,
+                        predictors=[x_col],
+                        primary_predictors=[x_col],
+                        categorical_vars=[],
+                        robust_se=False,
+                    )
+
+                    explanation = _build_model_explanation(
+                        model=model,
+                        outcome=y_col,
+                        predictors=[x_col],
+                        additional_covars=[],
+                        categorical_vars=[],
+                        data=plot_data,
+                        formula=formula,
+                    )
+
+                    title = (
+                        f"{y_col} vs {x_col} | "
+                        f"n={int(model.nobs)}"
+                    )
+
+                except Exception as error:
+
+                    st.warning(
+                        f"OLS could not be fitted for "
+                        f"{y_col} vs {x_col}: {error}"
+                    )
+
+                    plt.close(fig)
+                    continue
+
+                # -----------------------------------------
+                # Formatting
+                # -----------------------------------------
+                ax.set_title(title)
+                ax.set_xlabel(x_col)
+                ax.set_ylabel(y_col)
+
+                fig.tight_layout()
+
+                st.pyplot(
+                    fig,
+                    width="stretch"
+                )
+
+                plt.close(fig)
+
+
+                with st.expander(f"OLS result and explanation: {y_col} vs {x_col}", expanded=False):
+                    _render_explanation(explanation, y_col)
+
+
+                    # -------------------------------------------------
+                    # Per-group statistics: only for grouped plots
+                    # -------------------------------------------------
+                    if plot_by_group and plot_group_col and selected_groups:
+                        group_stats_lines = []
+
+                        # Use the same finite numeric data plotted by _plot_univariate().
+                        stats_columns = [x_col, y_col, plot_group_col]
+                        stats_data = df[stats_columns].copy()
+                        stats_data[x_col] = _safe_numeric_series(stats_data, x_col)
+                        stats_data[y_col] = _safe_numeric_series(stats_data, y_col)
+                        stats_data = stats_data.replace([np.inf, -np.inf], np.nan).dropna()
+                        stats_data = stats_data.loc[
+                            stats_data[plot_group_col].isin(selected_groups)
+                        ].copy()
+
+                        group_order = [
+                            group for group in selected_groups
+                            if group in stats_data[plot_group_col].unique()
+                        ]
+
+                        for group in group_order:
+                            grp_df = stats_data.loc[stats_data[plot_group_col] == group].copy()
+
+                            # Need at least 3 observations and variation in X for valid simple OLS.
+                            if len(grp_df) < 3 or grp_df[x_col].nunique() < 2:
+                                group_stats_lines.append(
+                                    f"**{group}**  \n"
+                                    f"- n = {len(grp_df)}; insufficient observations or no variation in {x_col} for OLS."
+                                )
+                                continue
+
+                            try:
+                                # Use the same model fitting approach as multivariable OLS
+                                grp_model, grp_formula = _fit_ols_model(grp_df, y_col, [x_col], [], robust_se=False)
+                                grp_explanation = _build_model_explanation(grp_model, y_col, [x_col], [], grp_df, grp_formula)
+
+                                # Get correlation for additional context
+                                grp_r, grp_p = _corr_pair(grp_df[x_col], grp_df[y_col], method="pearson")
+
+                                # Build equation string
+                                sign = "+" if grp_explanation["coefficient_table"]["beta"].iloc[0] >= 0 else "-"
+                                beta_val = abs(grp_explanation["coefficient_table"]["beta"].iloc[0])
+                                intercept_val = grp_explanation["coefficient_table"]["intercept"].iloc[0] if "intercept" in grp_explanation["coefficient_table"].columns else grp_model.params["Intercept"]
+                                equation = f"{y_col} = {intercept_val:.3f} {sign} {beta_val:.3f} \u00d7 {x_col}"
+
+                                # Format significance stars
+                                r_star = p_to_star(grp_p) if pd.notna(grp_r) else ""
+                                beta_row = grp_explanation["coefficient_table"].iloc[0]
+                                beta_star = p_to_star(beta_row["p_value"])
+
+                                group_stats_lines.append(
+                                    (
+                                        f"**{group}**  \n"
+                                        f"- **Equation**: {equation}  \n"
+                                        f"- **N** = {grp_explanation['n']} | **R\u00B2** = {grp_explanation['r_squared']:.3f} | **Adj. R\u00B2** = {grp_explanation['adj_r_squared']:.3f}  \n"
+                                        f"- **Model p** = {_format_pvalue(grp_explanation['f_pvalue'])}  \n"
+                                        f"- **Pearson r** = {grp_r:.2f}{r_star} (p = {_format_pvalue(grp_p)})  \n"
+                                        f"- **Beta** = {beta_row['beta']:.3f}{beta_star} (p = {_format_pvalue(beta_row['p_value'])})  \n"
+                                        # Uncomment the line below if you want RMSE
+                                        # f"- **RMSE** = {grp_explanation['coefficient_table']['noise_sd'].iloc[0]:.3f}"
+                                    )
+                                )
+
+                            except Exception as error:
+                                group_stats_lines.append(
+                                    f"**{group}**  \n"
+                                    f"- OLS model could not be fitted: {error}"
+                                )
+
+                        if group_stats_lines:
+                            with st.expander(
+                                f"Per-group statistics: {y_col} vs {x_col}",
+                                expanded=False,
+                            ):
+                                st.markdown("\n\n".join(group_stats_lines))
+                                st.caption(
+                                    "These are separate, unadjusted simple OLS models fitted within each selected group. "
+                                    "They are not the same as a pooled model with group adjustment or an interaction term."
+                                )
+
+                buf = get_figure_download(fig)
+                st.download_button(
+                    label=f"Download {y_col} vs {x_col}",
+                    data=buf,
+                    file_name=f"univariate_ols_{x_col}_vs_{y_col}.png",
+                    mime="image/png",
+                    key=f"uniols_download_{x_col}_{y_col}",
+                )
+                plt.close(fig)
+
+
+
+
+def _render_multivariable_ols_section(
+    df,
+    continuous_cols,
+    categorical_cols,
+    # group_col,
+):
+    """Render multivariable OLS models, forest plots, and optional heatmap."""
+
+    # -----------------------------------------------------
+    # 1. Select outcomes and predictors
+    # -----------------------------------------------------
+    st.markdown("### Multivariable OLS")
+
+    st.caption(
+        "Each selected outcome is modeled separately using the same predictor set. "
+        "All coefficients are mutually adjusted for the other variables in the model."
+    )
+
+    available_columns = list(dict.fromkeys(continuous_cols + categorical_cols))
+
+    selector_left, selector_right = st.columns([1, 1],border=True,gap="small",)
+    with selector_left:
+        y_cols = st.multiselect("(Y) Outcome variable(s)",
+            options=available_columns,
+            placeholder="Select one or more outcomes",
+            key="multiols_y_multiselect",
+            help=(
+                "Select one or more continuous outcomes. "
+                "A separate OLS model is fitted for each outcome."
+            ),
+        )
+
+    with selector_right:
+        candidate_x = [col for col in available_columns if col not in y_cols]
+        x_cols = st.multiselect("(X) Predictor variable(s)",
+            options=candidate_x,
+            placeholder="Select one or more predictors",
+            key="multiols_x_multiselect",
+            help=(
+                "All selected predictors enter every outcome model "
+                "simultaneously."
+            ),
+        )
+
+    if not y_cols and not x_cols:
+        st.info("Select at least one outcome and one predictor variable.")
+        return
+
+    # -----------------------------------------------------
+    # 2. Select predictor roles
+    # -----------------------------------------------------
+
+    st.markdown("### Predictor roles")
+    st.caption(
+        "Primary predictors are the main variables of interest. "
+        "All other selected X variables are included as adjustment covariates."
+    )
+
+    role_left, role_right = st.columns([2, 2],border=True,gap="small",)
+    with role_left:
+        primary_predictors = st.multiselect("Primary predictors",
+            options=x_cols,
+            default=None,
+            placeholder="Select primary predictor(s)",
+            key="multiple_primary_predictors",
+            help=(
+                "These variables will be displayed in the forest plots. "
+                "All selected X variables still enter every model."
+            ),
+        )
+
+    additional_covars = [col for col in x_cols if col not in primary_predictors]
+    with role_right:
+        categorical_candidates = [col for col in x_cols if col in categorical_cols]
+        categorical_vars = []
+        if categorical_candidates:
+            categorical_vars = st.multiselect("Categorical variables",
+                options=categorical_candidates,
+                default=[],
+                key="multiols_categorical_multiselect",
+                help=(
+                    "Selected variables are treated as categorical using "
+                    "C(variable) in the statsmodels formula."
+                ),
+            )
+            if categorical_vars:
+                variable_labels = []
+                for col in categorical_vars:
+                    n_levels = df[col].dropna().nunique()
+                    if n_levels == 2:
+                        variable_type = "binary"
+                    elif n_levels >= 3:
+                        variable_type = "multilevel/ordinal"
+                    else:
+                        variable_type = "insufficient levels"
+                    variable_labels.append(
+                        f"{col}: {variable_type}"
+                    )
+                st.caption(" | ".join(variable_labels))
+
+    # -----------------------------------------------------
+    # 3. Model options
+    # -----------------------------------------------------
+    robust_se = st.checkbox("Use HC3 robust standard errors",
+        value=False,
+        key="multiols_robust_se",
+        help=("Changes standard errors, confidence intervals, and p-values. "
+              "Coefficient estimates remain unchanged."
+        ),
+    )
+
+    if primary_predictors is not None and len(primary_predictors) > 0:
+        run_analysis = st.button("Run multivariable OLS analysis",
+                                 type="primary",key="multiple_ols_run_button",)
+        if not run_analysis:
+            st.info(
+                        "Select outcomes and predictors, then click "
+                        "'Run multivariable OLS analysis'."
+                    )
+            return
+
+    # -----------------------------------------------------
+    # 4. Validate variables
+    # -----------------------------------------------------
+    required_columns = list(dict.fromkeys(y_cols + x_cols))
+
+    missing_columns = [
+        col for col in required_columns
+        if col not in df.columns
+    ]
+
+    if missing_columns:
+        st.error("These selected variables are missing from the dataframe: " + ", ".join(missing_columns))
+        return
+
+    # -----------------------------------------------------
+    # 5. Fit one model per outcome
+    # -----------------------------------------------------
+    results = {}
+    explanations = {}
+    failed_models = {}
+
+    for outcome_var in y_cols:
+        model_columns = [outcome_var] + x_cols
+        model_data = ( df[model_columns] .replace([np.inf, -np.inf], np.nan) .dropna() )
+        minimum_n = max( 10, len(x_cols) + 3, )
+
+        if len(model_data) < minimum_n:
+            failed_models[outcome_var] = (
+                "Too few complete observations after missing-data "
+                f"removal (n={len(model_data)}, required={minimum_n})."
+            )
+            continue
+
+        try:
+            model, formula = _fit_ols_model(
+                data=model_data,
+                outcome=outcome_var,
+                predictors=x_cols,
+                primary_predictors=primary_predictors,
+                categorical_vars=categorical_vars,
+                robust_se=robust_se,
+            )
+
+            results[outcome_var] = model
+
+            explanations[outcome_var] = _build_model_explanation(
+                model=model,
+                outcome=outcome_var,
+                predictors=x_cols,
+                additional_covars=additional_covars,
+                categorical_vars=categorical_vars,
+                data=model_data,
+                formula=formula,
+            )
+
+        except Exception as error:
+            failed_models[outcome_var] = str(error)
+
+    # -----------------------------------------------------
+    # 6. Display failed models
+    # -----------------------------------------------------
+    for outcome_var, message in failed_models.items():
+        st.warning(f"{outcome_var}: model not fitted — {message}")
+
+    if not results:
+        st.error("No model could be fitted with the selected variables.")
+        return
+
+    fitted_outcomes = list(results.keys())
+
+    # -----------------------------------------------------
+    # 7. Extract primary-predictor coefficients
+    # -----------------------------------------------------
+    coefficient_tables = []
+
+    for outcome_var, model in results.items():
+        coefficient_table = _extract_primary_coefficients(model=model,
+                                                          outcome=outcome_var,
+                                                          primary_predictors=primary_predictors,)
+        coefficient_tables.append(coefficient_table)
+    if not coefficient_tables:
+        st.warning("No coefficients were found for the selected primary predictors.")
+        return
+
+    all_coefficients = pd.concat(coefficient_tables,ignore_index=True,)
+
+    # -----------------------------------------------------
+    # 8. Forest plots
+    # -----------------------------------------------------
+    st.markdown("### Adjusted estimates")
+
+    st.caption(
+        "Each forest plot shows one primary predictor across all fitted "
+        "outcomes. Points are adjusted beta coefficients with 95% confidence intervals."
+    )
+
+    for predictor in primary_predictors:
+        predictor_data = all_coefficients[all_coefficients["predictor"] == predictor].copy()
+
+        if predictor_data.empty:
+            st.warning(f"No fitted coefficient found for primary predictor: {predictor}")
+            continue
+
+        fig = _plot_forest_by_predictor(coefficient_table=all_coefficients,predictor=predictor,)
+
+        if fig is None:
+            continue
+
+        st.pyplot(fig,width="stretch",)
+        forest_buffer = get_figure_download(fig)
+
+        st.download_button(label=f"Download forest plot: {predictor}",
+            data=forest_buffer,
+            file_name=(f"multivariable_ols_forest_"f"{predictor}.png"),
+            mime="image/png",
+            key=f"multivariable_ols_forest_download_{predictor}",
+        )
+
+        plt.close(fig)
+
+    # -----------------------------------------------------
+    # 9. Optional heatmap
+    # -----------------------------------------------------
+    if len(fitted_outcomes) > 1:
+        with st.expander("Beta heatmap", expanded=False):
+            st.markdown(
+            "This heatmap shows adjusted beta coefficients for each outcome-predictor pair. "
+            "For categorical predictors, each contrast is shown as an individual column.")
+
+            heatmap_fig, beta_matrix = _plot_beta_heatmap(explanations=explanations, outcomes=fitted_outcomes, predictors=x_cols,)
+
+            if heatmap_fig is not None:
+                st.pyplot(heatmap_fig,width="stretch",)
+                heatmap_buffer = get_figure_download(heatmap_fig)
+                col1, col2 = st.columns([1, 1], gap="small")
+
+                with col1:
+                    st.download_button(label="Download beta heatmap",
+                        data=heatmap_buffer,
+                        file_name=("multivariable_ols_beta_heatmap.png"),
+                        mime="image/png",
+                        key="multivariable_ols_heatmap_download",
+                    )
+
+                with col2:
+                    st.download_button(label="Download beta matrix (.csv)",
+                        data=beta_matrix.to_csv(index=True).encode("utf-8"),
+                        file_name=("multivariable_ols_beta_matrix.csv"),
+                        mime="text/csv",
+                        key="multiols_beta_csv_download",
+                    )
+
+                # plt.close(heatmap_fig)
+
+    # -----------------------------------------------------
+    # 10. Model results and explanations
+    # -----------------------------------------------------
+    st.markdown("### Model results and interpretation")
+    with st.expander("Each outcome model is shown separately with equation, " \
+                "coefficients, and interpretation.",expanded=False):
+        st.markdown(
+                "- **Continuous X:** beta is the adjusted expected change in Y "
+                "per one-unit increase in X.\n"
+                "- **Binary X coded 0/1:** beta is the adjusted difference in Y "
+                "for X=1 versus X=0.\n"
+                "- **Categorical X:** each coefficient is relative to the "
+                "statsmodels treatment reference category.\n"
+                "- **Ordinal X as numeric:** beta represents the adjusted change "
+                "in Y per one-level increase in the ordinal score.\n"
+                "- **95% CI:** intervals excluding zero are consistent with a "
+                "two-sided p-value below 0.05 under the selected model and "
+                "standard-error specification.\n"
+                "- **Heatmap:** cells show adjusted beta coefficients. Do not "
+                "compare unstandardized beta magnitudes across variables with "
+                "different measurement units."
+            )
+        for outcome in fitted_outcomes:
+            is_single_outcome = len(fitted_outcomes) == 1
+
+            with st.expander(f"{outcome} ~ equation, coefficients, and interpretation",expanded=is_single_outcome,):
+                _render_explanation(explanations[outcome],outcome,)
+                coefficient_table = explanations[outcome].get("coefficient_table")
+
+                if coefficient_table is not None:
+                    result_csv = coefficient_table.to_csv(index=False).encode("utf-8")
+
+                    st.download_button(
+                        label=(f"Download {outcome} coefficient table ""(.csv)"),
+                        data=result_csv,
+                        file_name=(f"multivariable_ols_"f"{outcome}_coefficients.csv"),
+                        mime="text/csv",
+                        key=f"multiols_table_download_{outcome}",
+                    )
+
+                with st.expander("Full statsmodels summary",expanded=False,):
+                    st.text(results[outcome].summary().as_text())
+

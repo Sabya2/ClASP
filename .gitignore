@@ -1,0 +1,36 @@
+
+# Image files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.bmp
+*.tiff
+*.webp
+
+# data files
+*.csv
+*.xlsx
+*.json
+*.xml
+*.yaml
+*.yml
+*.sql
+*.db
+*.sqlite
+
+# log files
+*.log
+
+# environment files
+.env
+.venv
+venv/
+env/
+ENV/
+
+
+# folder 
+__pycache__/
+x_old/

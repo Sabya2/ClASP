@@ -1,0 +1,234 @@
+"""Shared data-loading and session-state helpers."""
+
+from io import BytesIO
+
+import pandas as pd
+import streamlit as st
+import matplotlib.pyplot as plt
+
+def set_paper_plot_style():
+    """Apply the application's default Matplotlib style."""
+    plt.style.use("seaborn-v0_8")
+
+
+
+
+DEFAULT_SESSION_STATE = {
+    "df": None,
+    "df_name": None,
+    "group_col": None,
+    "continuous_cols": [],
+    "categorical_cols": [],
+    "participants_col": None,
+    "sheet_name": None,
+}
+
+
+def init_session_state():
+    """Initialize shared Streamlit state without replacing existing values."""
+    for key, value in DEFAULT_SESSION_STATE.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def read_csv_file(file_obj):
+    """Read an uploaded CSV file."""
+    return pd.read_csv(file_obj)
+
+
+def get_excel_sheet_names(file_obj):
+    """Return workbook sheet names and reusable file bytes."""
+    content = file_obj.read()
+    file_obj.seek(0)
+    xls = pd.ExcelFile(BytesIO(content))
+    return xls.sheet_names, content
+
+
+def read_excel_sheet(file_bytes, sheet_name=0):
+    """Read one sheet from uploaded Excel bytes."""
+    xls = pd.ExcelFile(BytesIO(file_bytes))
+    return pd.read_excel(xls, sheet_name=sheet_name)
+
+
+def infer_variable_types(df, group_col=None, unique_threshold=12):
+    """Infer continuous and categorical columns from dtypes and cardinality."""
+    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+    object_like_cols = df.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
+
+    low_cardinality_numeric = [
+        c for c in numeric_cols
+        if c != group_col and df[c].nunique(dropna=True) <= unique_threshold
+    ]
+
+    categorical_cols = list(dict.fromkeys(object_like_cols + low_cardinality_numeric))
+    continuous_cols = [c for c in numeric_cols if c != group_col and c not in categorical_cols]
+    return continuous_cols, categorical_cols
+
+
+def choose_default_group_col(df):
+    """Choose a likely grouping column, preferring common clinical names."""
+    if df is None or df.empty:
+        return None
+
+    priority_names = [
+        "AgeGroup", "group_label", "group", "Group", "GROUP", "Cohort",
+        "status", "chohort_exp_age_group", "sex", "Group_biologicalAge",
+    ]
+    for column in priority_names:
+        if column in df.columns:
+            return column
+
+    candidate_cat = [
+        column for column in df.columns
+        if str(df[column].dtype) in {"object", "category", "bool"}
+        or df[column].nunique(dropna=True) <= 12
+    ]
+    return candidate_cat[0] if candidate_cat else None
+
+
+def get_state():
+    """Return the analysis state used by all pages."""
+    return {
+        "df": st.session_state.get("df"),
+        "group_col": st.session_state.get("group_col"),
+        "continuous_cols": st.session_state.get("continuous_cols", []),
+        "categorical_cols": st.session_state.get("categorical_cols", []),
+        "participants_col": st.session_state.get("participants_col"),
+    }
+
+
+def _reset_variable_state(df):
+    """Reset inferred variable selections for a newly loaded dataset."""
+    default_group = choose_default_group_col(df)
+    cont_cols, cat_cols = infer_variable_types(df, group_col=default_group)
+
+    st.session_state["group_col"] = default_group
+    st.session_state["continuous_cols"] = cont_cols[: min(len(cont_cols), 100)]
+    st.session_state["categorical_cols"] = [c for c in cat_cols if c != default_group][: min(len(cat_cols), 8)]
+
+
+def load_dataframe_ui():
+    """Render the upload controls and return the current dataframe."""
+    st.sidebar.header("1. Load data")
+
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload CSV or Excel file",
+        type=["csv", "xlsx", "xls"],
+        key="stats_file_uploader",
+    )
+
+    if uploaded_file is not None:
+        file_name = uploaded_file.name
+        file_type = file_name.lower().split(".")[-1]
+
+        if file_type == "csv":
+            if st.session_state.get("df_name") != file_name:
+                try:
+                    df = read_csv_file(uploaded_file)
+                    st.session_state["df"] = df
+                    st.session_state["df_name"] = file_name
+                    st.session_state["sheet_name"] = None
+                    _reset_variable_state(df)
+                    st.sidebar.success("CSV loaded successfully.")
+                except Exception as e:
+                    st.sidebar.error(f"Could not load CSV: {e}")
+
+        elif file_type in ["xlsx", "xls"]:
+            try:
+                sheet_names, file_bytes = get_excel_sheet_names(uploaded_file)
+                selected_sheet = st.sidebar.selectbox(
+                    "Excel sheet",
+                    options=sheet_names,
+                    index=(
+                        sheet_names.index(st.session_state["sheet_name"])
+                        if st.session_state.get("sheet_name") in sheet_names
+                        else 0
+                    ),
+                    key="excel_sheet_selectbox",
+                )
+
+                needs_reload = (
+                    st.session_state.get("df_name") != file_name
+                    or st.session_state.get("sheet_name") != selected_sheet
+                )
+
+                if needs_reload:
+                    df = read_excel_sheet(file_bytes, selected_sheet)
+                    st.session_state["df"] = df
+                    st.session_state["df_name"] = file_name
+                    st.session_state["sheet_name"] = selected_sheet
+                    _reset_variable_state(df)
+                    st.sidebar.success("Excel sheet loaded successfully.")
+            except Exception as e:
+                st.sidebar.error(f"Could not load Excel file: {e}")
+
+    return st.session_state.get("df")
+
+def is_potential_id_col(series):
+    """Return whether a column is sufficiently complete and unique to be an ID."""
+    if series.empty or series.isna().mean() > 0.1:
+        return False
+    return series.nunique() / len(series) >= 0.8
+
+
+def render_sidebar_variable_selector(df):
+    """Render shared variable selectors and store their current values."""
+    st.sidebar.header("2. Variable selection")
+
+    if df is None:
+        st.sidebar.info("Upload a file first.")
+        return
+
+    all_cols = df.columns.tolist()
+    if not all_cols:
+        st.sidebar.warning("No columns found.")
+        return
+
+    id_candidates = [column for column in all_cols if is_potential_id_col(df[column])]
+
+    current_participant = st.session_state.get("participants_col")
+    if current_participant not in id_candidates and current_participant is not None:
+        current_participant = None
+
+    id_options = id_candidates + ["None"]
+    idx = id_options.index(current_participant or "None")
+
+    selected_participant = st.sidebar.selectbox(
+        "Participants column Identifier (optional)",
+        options=id_options,
+        index=idx,
+        key="participants_col_selectbox",
+    )
+
+    st.session_state["participants_col"] = (
+        None if selected_participant == "None" else selected_participant
+    )
+
+    previous_continuous = st.session_state.get("continuous_cols", [])
+    valid_continuous_default = [c for c in previous_continuous if c in all_cols]
+
+    st.session_state["continuous_cols"] = st.sidebar.multiselect(
+        "Continuous columns",
+        options=all_cols,
+        default=valid_continuous_default,
+        key="continuous_cols_multiselect",
+    )
+
+    saved_cont = st.session_state["continuous_cols"]
+
+    categorical_options = [c for c in all_cols if c not in saved_cont]
+
+    previous_categorical = st.session_state.get("categorical_cols", [])
+    valid_categorical_default = [c for c in previous_categorical if c in categorical_options]
+
+    st.session_state["categorical_cols"] = st.sidebar.multiselect(
+        "Categorical columns",
+        options=categorical_options,
+        default=valid_categorical_default,
+        key="categorical_cols_multiselect",
+    )
+
+    st.sidebar.markdown("### Session selections")
+    st.sidebar.caption(f"Participants: {st.session_state['participants_col']}")
+    st.sidebar.caption(f"Continuous: {len(st.session_state['continuous_cols'])}")
+    st.sidebar.caption(f"Categorical: {len(st.session_state['categorical_cols'])}")
