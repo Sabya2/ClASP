@@ -13,15 +13,15 @@ from srcs.utils_features.common import (
 
 
 DEFAULT_PAGE_CONFIG = {
-    "1_Clasp-intro.py": {"title": "HomePage", "icon": "📊"},
-    "Data-Description.py": {"title": "Data Summary", "icon": "📊"},
-    "Histograms.py": {"title": "Data Distribution", "icon": "📶"},
-    "Linear.py": {"title": "Regression Analysis", "icon": "📈"},
+    "HomePage.py": {"title": "HomePage", "icon": "🏠"},
+    "DataDescription.py": {"title": "Data Summary", "icon": "📋"},
+    "DataDistribution.py": {"title": "Data Distribution", "icon": "📊"},
+    "RegressionAnalysis.py": {"title": "Regression Analysis", "icon": "📈"},
     "Correlation.py": {"title": "Correlation Analysis", "icon": "🔗"},
-    "Group-comparison.py": {"title": "Group Comparison Analysis", "icon": "⚖️"},
+    "GroupComparison.py": {"title": "Group Comparison Analysis", "icon": "⚖️"},
     "Mediation.py": {"title": "Mediation Analysis", "icon": "🔀"},
-    "Temporal-Dynamics.py": {"title": "Temporal Dynamics", "icon": "⏱️"},
-    "Responder.py": {"title": "Responder Analysis", "icon": "🔗"},
+    "Temporal-Dynamics.py": {"title": "Temporal Dynamics", "icon": "🕒"},
+    "Responder.py": {"title": "Responder Analysis", "icon": "🎯"},
 }
 
 
@@ -31,10 +31,13 @@ def build_analysis_pages(pages_dir: str = "pages") -> list:
     if not pages_path.exists():
         return []
 
-    page_files = sorted(
-        (path for path in pages_path.glob("*.py") if path.name in DEFAULT_PAGE_CONFIG),
-        key=lambda path: path.name,
-    )
+    # Iterate over the configuration itself so the navigation follows its
+    # insertion order instead of sorting pages alphabetically by filename.
+    page_files = [
+        pages_path / filename
+        for filename in DEFAULT_PAGE_CONFIG
+        if (pages_path / filename).is_file()
+    ]
     return [
         st.Page(str(path), **DEFAULT_PAGE_CONFIG[path.name])
         for path in page_files

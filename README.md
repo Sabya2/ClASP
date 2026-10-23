@@ -23,6 +23,7 @@ ClASPx accepts:
 A typical dataset should `first row` with column name and each subsequent row should represent one participant or observation.
 Column names should be clear and unique. Avoid using the same name for two columns.
 
+- Column names should contain only letters, numbers, and underscores (`_`). Avoid spaces and other special characters, as they can interfere with the analysis code and cause the application to fail.
 - One optional participant identifier column, such as `participant_id`.
 - One optional grouping column, such as `group`, `sex`, `age_type`, or `diagnosis`.
 - Numeric columns containing measurements for statistical analyses.
