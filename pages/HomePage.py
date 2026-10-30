@@ -5,6 +5,7 @@ import streamlit as st
 
 HELP_TOPICS = {
     "Data summary": "pages/DataDescription.py",
+    "Wrong column names": "pages/DaataDescription.py",
     "Column types": "pages/DataDescription.py",
     "Missing data": "pages/DataDescription.py",
     "Histograms": "pages/DataDistribution.py",
@@ -40,7 +41,8 @@ GUIDE_CONTENT = {
         ],
         "Column names": [
             "Column names should be clear and unique.",
-            "Use only letters, numbers, and underscores (`_`) in column names. Avoid spaces and other special characters, as they can interfere with the analysis code and cause the application to fail.",
+            "Use only letters, numbers, and underscores (`_`) in column names. Avoid spaces, leading or trailing whitespace, and other special characters, as they can interfere with the analysis code and cause the application to fail.",
+            "After uploading your data, open **Data summary**. The Data description page displays a red error when incorrectly named columns are detected; expand **View invalid column names** to see the affected columns.",
         ],
         "CSV": [
             "Save as UTF-8 CSV; use commas to separate columns; keep the first row as the header.",
@@ -55,7 +57,8 @@ GUIDE_CONTENT = {
     },
     "Data quality": {
         "Import checks": [
-            "ClASPx attempts to convert selected columns to numeric, interpret decimal separators correctly, and validate participant IDs where required."
+            "ClASPx attempts to convert selected columns to numeric, interpret decimal separators correctly, and validate participant IDs where required.",
+            "Check **Data summary** for incorrectly named columns. Column-name validation identifies spaces, leading or trailing whitespace, and other unsupported characters.",
         ],
         "Consistency": [
             "Group label consistency is checked (e.g., `Training` vs. `training`)."
@@ -114,6 +117,63 @@ with help_col:
         st.switch_page(HELP_TOPICS[selected_topic])
 
 
+st.markdown("#### Guidlines")
+
+section_col, section_line_col, topic_col, topic_line_col, guidance_col = st.columns(
+    [1, 0.18, 1.2, 0.18, 3.25],
+    gap="small",
+    vertical_alignment="top",
+)
+
+with section_col:
+    with st.container(border=False):
+        selected_section = st.segmented_control(
+            "Guidance section",
+            options=list(GUIDE_CONTENT),
+            default="Input data",
+            label_visibility="collapsed",
+        )
+
+with section_line_col:
+    st.markdown(
+        """<div style="display:flex;align-items:center;margin-top:2rem">
+        <span style="width:7px;height:7px;border-radius:50%;background:var(--primary-color, #76B5A5)"></span>
+        <span style="flex:1;border-top:2px solid var(--primary-color, #76B5A5)"></span>
+        <span style="width:7px;height:7px;border-radius:50%;background:var(--primary-color, #76B5A5)"></span>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+if selected_section:
+    subtopics = list(GUIDE_CONTENT[selected_section])
+    default_subtopic = "Column names" if selected_section == "Input data" else subtopics[0]
+
+    with topic_col:
+        with st.container(border=False):
+            selected_subtopic = st.segmented_control(
+                "Guidance topic",
+                options=subtopics,
+                default=default_subtopic,
+                label_visibility="collapsed",
+                key=f"guide_topic_{selected_section}",
+            )
+
+    with topic_line_col:
+        st.markdown(
+            """<div style="display:flex;align-items:center;margin-top:2rem">
+            <span style="width:7px;height:7px;border-radius:50%;background:var(--primary-color, #76B5A5)"></span>
+            <span style="flex:1;border-top:2px solid var(--primary-color, #76B5A5)"></span>
+            <span style="width:7px;height:7px;border-radius:50%;background:var(--primary-color, #76B5A5)"></span>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+    if selected_subtopic:
+        with guidance_col:
+            with st.container(border=True):
+                for paragraph in GUIDE_CONTENT[selected_section][selected_subtopic]:
+                    st.markdown(paragraph)
+
 
 st.markdown("### Reproducibility and citation")
 st.markdown("Record ClASPx version, analysis date, input-data preparation steps, selected variables, statistical method and options, grouping variable (if used), and downloaded output files.")
@@ -122,27 +182,6 @@ st.markdown("#### DOI")
 st.markdown("DOI: _[to be added upon release]_")
 
 st.info("Please use this citation upon usage of the tool.")
-
-
-selected_section = st.segmented_control(
-    "Guidance section",
-    options=list(GUIDE_CONTENT),
-    default=None,
-    label_visibility="collapsed",
-)
-
-if selected_section:
-    selected_subtopic = st.segmented_control(
-        "Guidance topic",
-        options=list(GUIDE_CONTENT[selected_section]),
-        default=None,
-        label_visibility="collapsed",
-        key=f"guide_topic_{selected_section}",
-    )
-    if selected_subtopic:
-        for paragraph in GUIDE_CONTENT[selected_section][selected_subtopic]:
-            st.markdown(paragraph)
-
 
 st.markdown("### Feedback and support")
 st.markdown("Use the **Send feedback** link in the application to report problems or suggest improvements; do not include confidential or identifiable data.")

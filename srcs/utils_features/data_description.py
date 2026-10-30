@@ -1,9 +1,11 @@
 """Dataset summaries and downloadable publication tables."""
 
+import re
+from io import BytesIO
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-from io import BytesIO
 
 from scipy.stats import f_oneway, kruskal, chi2_contingency
 from openpyxl.utils import get_column_letter
@@ -25,6 +27,30 @@ def get_basic_info(df: pd.DataFrame) -> pd.DataFrame:
         .sort_values(["missing_values", "unique_values"], ascending=[False, False])
         .reset_index(drop=True)
     )
+
+
+def check_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    """Return columns whose names contain whitespace or special characters."""
+    issues = []
+
+    for col in df.columns:
+        col_name = str(col)
+        problems = []
+
+        if col_name != col_name.strip():
+            problems.append("Leading/trailing whitespace")
+
+        # Letters, numbers, and underscores are the supported characters.
+        if re.search(r"[^a-zA-Z0-9_]", col_name):
+            problems.append("Special character or whitespace")
+
+        if problems:
+            issues.append({
+                "Column_Name": repr(col_name),
+                "Issues": ", ".join(problems),
+            })
+
+    return pd.DataFrame(issues, columns=["Column_Name", "Issues"])
 
 
 def format_p_value(p: float) -> str:
@@ -405,6 +431,19 @@ def render_data_description_page(
 
     with st.expander("Data preview and structure", expanded=False):
         st.dataframe(get_basic_info(df_filtered), width="stretch")
+
+    problematic_columns = check_column_names(df_filtered)
+    if not problematic_columns.empty:
+        st.error(
+            "❗ Invalid column names detected. Use only letters, numbers, and "
+            "underscores (`_`) in column names."
+        )
+        with st.expander("View invalid column names", expanded=False):
+            issue_details = "\n".join(
+                f"- `{row.Column_Name}` — {row.Issues}"
+                for row in problematic_columns.itertuples(index=False)
+            )
+            st.error(f"**Affected columns**\n\n{issue_details}")
 
     # -----------------------------------------------------
     # Summary settings

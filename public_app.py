@@ -19,7 +19,7 @@ DEFAULT_PAGE_CONFIG = {
     "RegressionAnalysis.py": {"title": "Regression Analysis", "icon": "📈"},
     "Correlation.py": {"title": "Correlation Analysis", "icon": "🔗"},
     "GroupComparison.py": {"title": "Group Comparison Analysis", "icon": "⚖️"},
-    "Mediation.py": {"title": "Mediation Analysis", "icon": "🔀"},
+    # "Mediation.py": {"title": "Mediation Analysis", "icon": "🔀"},
     "Temporal-Dynamics.py": {"title": "Temporal Dynamics", "icon": "🕒"},
     "Responder.py": {"title": "Responder Analysis", "icon": "🎯"},
 }
@@ -52,9 +52,28 @@ def main() -> None:
     )
     st.markdown(
         """
+        <style>
+        div[data-testid="stButton"] button:hover,
+        div[data-testid="stDownloadButton"] button:hover,
+        div[data-testid="stFormSubmitButton"] button:hover,
+        div[data-testid="stLinkButton"] a:hover,
+        div[data-testid="stPills"] button:hover,
+        div[data-testid="stSegmentedControl"] button:hover,
+        div[data-testid="stButtonGroup"] button:hover {
+            background-color: #A7D8CC !important;
+            border-color: #A7D8CC !important;
+            color: #111827 !important;
+            transition: background-color 0.15s ease, border-color 0.15s ease;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        """
         <div style="display:flex;align-items:baseline;gap:12px">
           <span style="font-size:36px;font-weight:700">CLASP</span>
-          <span style="font-size:20px;color:#666">
+          <span style="font-size:20px;color:#5F9F93">
             - CLinical and Statistical Analysis Software Platform
           </span>
         </div>

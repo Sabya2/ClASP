@@ -1,9 +1,18 @@
+# .streamlit/config.toml
+
+
 [server]
 runOnSave = true
 
-# .streamlit/config.toml
+#[theme]
+#primaryColor = "#76B5A5"
+#backgroundColor = "#111827"
+#secondaryBackgroundColor = "#1F2937"
+#textColor = "#9DCABF"
+
+
 [theme]
-primaryColor="#0099ff"
-backgroundColor="#000000"
-secondaryBackgroundColor="#4e4e4e"
-textColor="#FAFAFA"
+primaryColor = "#9DCABF"
+backgroundColor = "#111827"
+secondaryBackgroundColor = "#1F2937"
+textColor = "#CCE3DD"

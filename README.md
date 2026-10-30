@@ -23,7 +23,7 @@ ClASPx accepts:
 A typical dataset should `first row` with column name and each subsequent row should represent one participant or observation.
 Column names should be clear and unique. Avoid using the same name for two columns.
 
-- Column names should contain only letters, numbers, and underscores (`_`). Avoid spaces and other special characters, as they can interfere with the analysis code and cause the application to fail.
+- Column names should contain only letters, numbers, and underscores (`_`). Avoid spaces, leading or trailing whitespace, and other special characters, as they can interfere with the analysis code and cause the application to fail. The **Data description** page displays a red error when invalid names are detected; expand **View invalid column names** to see the affected columns.
 - One optional participant identifier column, such as `participant_id`.
 - One optional grouping column, such as `group`, `sex`, `age_type`, or `diagnosis`.
 - Numeric columns containing measurements for statistical analyses.
@@ -87,8 +87,9 @@ For Excel files:
 
 ## Missing data and data quality
 
-Before analysis, check under datya descriptioon section
+Before analysis, check the **Data description** section:
 
+- Whether the column-name validation reports spaces, leading or trailing whitespace, or other unsupported characters.
 - Whether numeric columns were imported as numeric values.
 - Whether decimal separators were interpreted correctly.
 - Whether participant IDs are present and unique where required.
