@@ -13,6 +13,8 @@ from scipy import stats
 from scipy.stats import shapiro, levene, f_oneway, kruskal, ttest_ind, mannwhitneyu
 from statsmodels.stats.multitest import multipletests
 
+from srcs.utils_visualisation.plot_style import apply_graph_font
+
 
 
 
@@ -88,9 +90,6 @@ def set_paper_plot_style(show_grid=False):
     )
     sns.set_context("paper", font_scale=0.8)
 
-    plt.rcParams["font.family"] = "serif"
-    plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
-
     plt.rcParams.update({
         "font.size": 10,
         "axes.titlesize": 10,
@@ -104,6 +103,7 @@ def set_paper_plot_style(show_grid=False):
         "savefig.facecolor": "white",
         "axes.grid": show_grid,
     })
+    apply_graph_font()
 
     if show_grid:
         plt.rcParams.update({

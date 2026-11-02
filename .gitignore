@@ -34,3 +34,5 @@ ENV/
 # folder 
 __pycache__/
 x_old/
+
+codex.md

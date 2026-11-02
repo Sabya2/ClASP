@@ -24,24 +24,34 @@ DEFAULT_PAGE_CONFIG = {
     "Responder.py": {"title": "Responder Analysis", "icon": "🎯"},
 }
 
+SUPPORT_PAGE_CONFIG = {
+    "Contact-Request.py": {
+        "title": "Contact / Request Analysis",
+        "icon": "✉️",
+    },
+}
 
-def build_analysis_pages(pages_dir: str = "pages") -> list:
-    """Build the configured Streamlit pages found in ``pages_dir``."""
+
+def _build_pages(page_config: dict, pages_dir: str = "pages") -> list:
+    """Build configured Streamlit pages in configuration order."""
     pages_path = Path(pages_dir)
     if not pages_path.exists():
         return []
-
-    # Iterate over the configuration itself so the navigation follows its
-    # insertion order instead of sorting pages alphabetically by filename.
-    page_files = [
-        pages_path / filename
-        for filename in DEFAULT_PAGE_CONFIG
+    return [
+        st.Page(str(pages_path / filename), **page_config[filename])
+        for filename in page_config
         if (pages_path / filename).is_file()
     ]
-    return [
-        st.Page(str(path), **DEFAULT_PAGE_CONFIG[path.name])
-        for path in page_files
-    ]
+
+
+def build_analysis_pages(pages_dir: str = "pages") -> list:
+    """Build the configured Streamlit pages found in ``pages_dir``."""
+    return _build_pages(DEFAULT_PAGE_CONFIG, pages_dir)
+
+
+def build_support_pages(pages_dir: str = "pages") -> list:
+    """Build support pages shown in the sidebar navigation."""
+    return _build_pages(SUPPORT_PAGE_CONFIG, pages_dir)
 
 
 def main() -> None:
@@ -93,7 +103,12 @@ def main() -> None:
         st.error("No analysis pages found in the 'pages' directory.")
         return
 
-    st.navigation({"Analysis": analysis_pages}).run()
+    navigation_sections = {"Analysis": analysis_pages}
+    support_pages = build_support_pages()
+    if support_pages:
+        navigation_sections["Support"] = support_pages
+
+    st.navigation(navigation_sections).run()
 
 
 if __name__ == "__main__":

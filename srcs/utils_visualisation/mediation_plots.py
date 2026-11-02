@@ -11,6 +11,7 @@ import statsmodels.api as sm
 import streamlit as st
 
 from srcs.utils_visualisation.common import get_figure_download
+from srcs.utils_visualisation.plot_style import apply_graph_font
 
 
 @st.cache_data
@@ -91,6 +92,7 @@ def plot_mediation_model_streamlit(indirect_dist, x_name, y_name, m_name,
                                   covariates_used=None):
     """Updated plot with covariate info"""
     plt.style.use('default')
+    apply_graph_font()
 
     fig, axes = plt.subplots(1, 2, figsize=(18, 8))
     fig.patch.set_facecolor('white')

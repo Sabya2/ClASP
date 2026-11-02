@@ -245,7 +245,10 @@ For a published study, cite the exact software version used rather than only the
 
 ## Feedback
 
-Use the **Send feedback** link in the application to report a problem or suggest an improvement. Do not include participant names, patient identifiers, clinical records, or other confidential information in feedback messages.
+Use **Support → Contact / Request Analysis** in the application to request an
+analysis, report a problem, or suggest an improvement. Do not include
+participant names, patient identifiers, clinical records, or other confidential
+information in messages or attachments.
 
 ## Privacy and security
 
@@ -263,3 +266,19 @@ When reporting an issue, include:
 - A small synthetic example that reproduces the problem, if possible.
 
 Never send confidential or identifiable participant data when requesting support.
+
+## Contact / Request Analysis configuration
+
+The sidebar **Support → Contact / Request Analysis** page provides links to a
+Google Form and to the user's own email application. Configure both public
+destinations in `srcs/utils_features/contact_config.py`:
+
+```python
+GOOGLE_FORM_URL = "https://forms.gle/YOUR_FORM_ID"
+CONTACT_EMAIL = "your-email@example.com"
+```
+
+No SMTP service, email password, application secret, or external email API is
+used. Google Forms handles form submissions. The email option creates a safely
+encoded `mailto:` link; the user must review and send the message from their own
+configured email application.

@@ -1,14 +1,19 @@
 """Shared data-loading and session-state helpers."""
 
+import re
+from collections import defaultdict
 from io import BytesIO
 
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 
+from srcs.utils_visualisation.plot_style import apply_graph_font
+
 def set_paper_plot_style():
     """Apply the application's default Matplotlib style."""
     plt.style.use("seaborn-v0_8")
+    apply_graph_font()
 
 
 
@@ -21,7 +26,166 @@ DEFAULT_SESSION_STATE = {
     "categorical_cols": [],
     "participants_col": None,
     "sheet_name": None,
+    "temporal_cols": [],
+    "temporal_families": {},
+    "temporal_summary": None,
+    "temporal_columns_signature": None,
 }
+
+
+NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?")
+
+
+def normalize_temporal_template(template):
+    """Normalize separators so equivalent numbered columns group together."""
+    template = str(template).strip().lower()
+    template = re.sub(r"[\s_-]+", "_", template)
+    template = re.sub(r"_*\{time\}_*", "{time}", template)
+    template = re.sub(r"_*([\[\]()])_*", r"\1", template)
+    return template.strip("_")
+
+
+def temporal_template_to_family_name(template):
+    """Turn a numbered-column template into a readable family name."""
+    family = re.sub(
+        r"(?i)(?:^|[\s_-]+)T[p]?[\s_-]*\{time\}",
+        "",
+        template,
+    )
+    units = (
+        r"seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?|"
+        r"months?|years?"
+    )
+    family = re.sub(
+        rf"(?i)[\s_-]*\{{time\}}\s*(?:{units})",
+        "",
+        family,
+    )
+    family = re.sub(
+        rf"(?i)[\s_-]*(?:{units})[\s_-]*\{{time\}}",
+        "",
+        family,
+    )
+    family = family.replace("{time}", "")
+    family = re.sub(r"_{2,}", "_", family)
+    family = re.sub(r"\s{2,}", " ", family)
+    family = re.sub(r"[-_]\s*$", "", family)
+    family = re.sub(r"^\s*[-_]", "", family)
+    family = re.sub(r"[_-]+\s*(?=\[)", " ", family)
+    return family.strip(" _-")
+
+
+def generate_number_templates(column):
+    """Return a candidate template for every number in a column name."""
+    column = str(column).strip()
+    candidates = []
+    for number_position, match in enumerate(NUMBER_PATTERN.finditer(column)):
+        time_text = match.group()
+        time_value = float(time_text)
+        if time_value.is_integer():
+            time_value = int(time_value)
+        template = f"{column[:match.start()]}{{time}}{column[match.end():]}"
+        candidates.append({
+            "column": column,
+            "template": template,
+            "normalized_template": normalize_temporal_template(template),
+            "time": time_value,
+            "time_text": time_text,
+            "number_position": number_position,
+        })
+    return candidates
+
+
+def identify_repeated_measure_families(df, minimum_timepoints=2):
+    """Find column families that differ at one numeric measurement position."""
+    if df is None:
+        return [], {}, pd.DataFrame()
+
+    template_candidates = defaultdict(list)
+    for column in df.columns:
+        for candidate in generate_number_templates(column):
+            template_candidates[candidate["normalized_template"]].append(candidate)
+
+    families = {}
+    for candidates in template_candidates.values():
+        unique_candidates = {
+            (
+                candidate["column"],
+                candidate["time"],
+                candidate["number_position"],
+            ): candidate
+            for candidate in candidates
+        }
+        candidates = list(unique_candidates.values())
+        distinct_columns = {item["column"] for item in candidates}
+        distinct_times = {item["time"] for item in candidates}
+        if (
+            len(distinct_columns) < minimum_timepoints
+            or len(distinct_times) < minimum_timepoints
+        ):
+            continue
+
+        candidates.sort(key=lambda item: (item["time"], item["column"]))
+        template = candidates[0]["template"]
+        family_name = temporal_template_to_family_name(template)
+        family_key = (family_name, normalize_temporal_template(template))
+        families[family_key] = {
+            "family": family_name,
+            "template": template,
+            "timepoints": [item["time"] for item in candidates],
+            "columns": [item["column"] for item in candidates],
+            "items": candidates,
+        }
+
+    repeated_columns = list(dict.fromkeys(
+        column
+        for family_data in families.values()
+        for column in family_data["columns"]
+    ))
+    summary_rows = [
+        {
+            "family": family_data["family"],
+            "template": family_data["template"],
+            "timepoint": item["time"],
+            "timepoint_text": item["time_text"],
+            "column": item["column"],
+            "number_of_timepoints": len(set(family_data["timepoints"])),
+        }
+        for family_data in families.values()
+        for item in family_data["items"]
+    ]
+    summary = pd.DataFrame(summary_rows)
+    if not summary.empty:
+        summary = summary.sort_values(
+            ["family", "template", "timepoint"]
+        ).reset_index(drop=True)
+    return repeated_columns, families, summary
+
+
+def get_repeated_measure_families(df=None, minimum_timepoints=2, force=False):
+    """Return detected families and keep them available in Streamlit state."""
+    if df is None:
+        df = st.session_state.get("df")
+
+    signature = (
+        tuple(map(str, df.columns)) if df is not None else None,
+        minimum_timepoints,
+    )
+    if force or st.session_state.get("temporal_columns_signature") != signature:
+        columns, families, summary = identify_repeated_measure_families(
+            df,
+            minimum_timepoints=minimum_timepoints,
+        )
+        st.session_state["temporal_cols"] = columns
+        st.session_state["temporal_families"] = families
+        st.session_state["temporal_summary"] = summary
+        st.session_state["temporal_columns_signature"] = signature
+
+    return (
+        st.session_state.get("temporal_cols", []),
+        st.session_state.get("temporal_families", {}),
+        st.session_state.get("temporal_summary", pd.DataFrame()),
+    )
 
 
 def init_session_state():
@@ -94,6 +258,9 @@ def get_state():
         "continuous_cols": st.session_state.get("continuous_cols", []),
         "categorical_cols": st.session_state.get("categorical_cols", []),
         "participants_col": st.session_state.get("participants_col"),
+        "temporal_cols": st.session_state.get("temporal_cols", []),
+        "temporal_families": st.session_state.get("temporal_families", {}),
+        "temporal_summary": st.session_state.get("temporal_summary"),
     }
 
 
@@ -105,6 +272,7 @@ def _reset_variable_state(df):
     st.session_state["group_col"] = default_group
     st.session_state["continuous_cols"] = cont_cols[: min(len(cont_cols), 100)]
     st.session_state["categorical_cols"] = [c for c in cat_cols if c != default_group][: min(len(cat_cols), 8)]
+    get_repeated_measure_families(df, minimum_timepoints=2, force=True)
 
 
 def load_dataframe_ui():
@@ -168,7 +336,7 @@ def is_potential_id_col(series):
     """Return whether a column is sufficiently complete and unique to be an ID."""
     if series.empty or series.isna().mean() > 0.1:
         return False
-    return series.nunique() / len(series) >= 0.8
+    return series.nunique() / len(series) >= 0.5
 
 
 def render_sidebar_variable_selector(df):

@@ -5,7 +5,7 @@ import streamlit as st
 
 HELP_TOPICS = {
     "Data summary": "pages/DataDescription.py",
-    "Wrong column names": "pages/DaataDescription.py",
+    "Wrong column names": "pages/DataDescription.py",
     "Column types": "pages/DataDescription.py",
     "Missing data": "pages/DataDescription.py",
     "Histograms": "pages/DataDistribution.py",
@@ -18,11 +18,25 @@ HELP_TOPICS = {
     "Violin plots": "pages/GroupComparison.py",
     "Group tests": "pages/GroupComparison.py",
     "Mediation": "pages/Mediation.py",
+    "Temporal dynamics": "pages/Temporal-Dynamics.py",
     "Time series": "pages/Temporal-Dynamics.py",
     "Trajectories": "pages/Temporal-Dynamics.py",
+    "Repeated measures": "pages/Temporal-Dynamics.py",
+    "Longitudinal data": "pages/Temporal-Dynamics.py",
+    "Within-family dynamics": "pages/Temporal-Dynamics.py",
+    "Cross-family dynamics": "pages/Temporal-Dynamics.py",
+    "Temporal grouping": "pages/Temporal-Dynamics.py",
+    "Baseline normalization": "pages/Temporal-Dynamics.py",
     "Responders": "pages/Responder.py",
     "Pre/post change": "pages/Responder.py",
     "SWC and TE": "pages/Responder.py",
+    "Contact / Request Analysis": "pages/Contact-Request.py",
+    "Analysis request": "pages/Contact-Request.py",
+    "Feature request": "pages/Contact-Request.py",
+    "Feedback": "pages/Contact-Request.py",
+    "Bug report": "pages/Contact-Request.py",
+    "Support": "pages/Contact-Request.py",
+    "General inquiry": "pages/Contact-Request.py",
 }
 
 GUIDE_CONTENT = {
@@ -81,6 +95,14 @@ GUIDE_CONTENT = {
         "Group comparison": [
             "Visualize continuous variables across groups with box/violin plots, optional y-axis transformations, and omnibus plus pairwise statistical tests."
         ],
+        "Temporal dynamics": [
+            "Open the **Temporal Dynamics** page to analyze repeated measurements whose column names share a common structure and differ at a numbered measurement position.",
+            "Examples include `Glucose_T1`, `Spiro_3min_HR`, `OCTA_hour_4`, and `Spiro_Level1_[W]`. The page groups matching columns into families and orders them by their detected timepoint.",
+            "Use **Within-Family dynamics** to inspect selected families in their own trajectory graphs, choose SD, SE, or 95% CI error bars, and optionally display an overall median or separate trajectories from an existing group column.",
+            "Use **Cross-Family dynamics** to compare any number of families. Separate layout distributes families across graphs in groups of two or three; Combined layout overlays every selected family in one graph.",
+            "When a participant ID is selected, baseline normalization can set each participant's first available value within each family to 100% before summary statistics are calculated.",
+            "Review **Detected repeated-measure families** on the page before analysis to confirm the inferred family names, source columns, and numerical timepoints.",
+        ],
     },
     "Privacy": {
         "Safe uploads": [
@@ -100,10 +122,30 @@ quick_start_col, help_col = st.columns(2, gap="large")
 
 with quick_start_col:
     st.markdown("### Quick start")
-    st.markdown("1. Prepare a CSV/Excel file following the input requirements below.")
+    st.markdown("1. Prepare a CSV/Excel file using the "
+        "[input requirements](#guidelines) below."
+    )
     st.markdown("2. Upload the file and verify columns are detected correctly.")
-    st.markdown("3. Select variables and analysis options on the relevant page.")
-    st.markdown("4. Download results where available.")
+    st.markdown("3. Open Data Summary using the link below and review any incorrectly "
+        "named columns. The page lists affected columns so you can rename them "
+        "before analysis."
+    )
+    st.page_link(
+        "pages/DataDescription.py",
+        label="Open Data Summary", icon="📋", )
+
+    st.markdown("4. Update invalid names to use letters, numbers, and underscores only "
+        "(for example, `systolic_bp_T1`) to avoid analysis errors."
+    )
+    st.markdown("5. Use the clickable Help topics to open the relevant analysis page, "
+        "then select variables and analysis options."
+    )
+    st.markdown("6. Download results where available.")
+    st.markdown("7. Open Contact / Request Analysis using the link below to request an "
+        "analysis, suggest a feature, send feedback, or report a problem."
+    )
+    st.page_link(
+        "pages/Contact-Request.py",label="Open Contact / Request Analysis",icon="✉️",)
 
 with help_col:
     st.markdown("### Help")
@@ -117,7 +159,7 @@ with help_col:
         st.switch_page(HELP_TOPICS[selected_topic])
 
 
-st.markdown("#### Guidlines")
+st.markdown("#### Guidelines")
 
 section_col, section_line_col, topic_col, topic_line_col, guidance_col = st.columns(
     [1, 0.18, 1.2, 0.18, 3.25],
@@ -184,5 +226,17 @@ st.markdown("DOI: _[to be added upon release]_")
 st.info("Please use this citation upon usage of the tool.")
 
 st.markdown("### Feedback and support")
-st.markdown("Use the **Send feedback** link in the application to report problems or suggest improvements; do not include confidential or identifiable data.")
+st.markdown(
+    "Open **Contact / Request Analysis** to request an analysis, suggest a "
+    "feature, send feedback, report a bug, or submit a general inquiry."
+)
+st.page_link(
+    "pages/Contact-Request.py",
+    label="Contact / Request Analysis",
+    icon="✉️",
+)
+st.warning(
+    "Do not include confidential or identifiable participant data in the "
+    "message or attachments."
+)
 st.markdown("When reporting an issue, include ClASPx version, analysis page, file type and size, selected options, exact error message, and a small synthetic example if possible.")
