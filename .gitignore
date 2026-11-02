@@ -35,4 +35,4 @@ ENV/
 __pycache__/
 x_old/
 
-codex.md
+/codex.md
