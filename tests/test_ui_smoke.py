@@ -2,9 +2,13 @@ from streamlit.testing.v1 import AppTest
 import pandas as pd
 import pytest
 
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
 
 def test_main_application_starts_without_streamlit_exception():
-    app = AppTest.from_file("public_app.py").run(timeout=20)
+    app = AppTest.from_file(str(PROJECT_ROOT/"public_app.py")).run(timeout=20)
     assert not app.exception
 
 
@@ -17,8 +21,8 @@ def test_main_application_starts_without_streamlit_exception():
     ],
 )
 def test_supported_page_starts_with_synthetic_data(page):
-    df = pd.read_csv("tests/data/synthetic_clinical.csv")
-    app = AppTest.from_file(f"pages/{page}")
+    df = pd.read_csv(str(PROJECT_ROOT / "tests/data/synthetic_clinical.csv"))
+    app = AppTest.from_file(str(PROJECT_ROOT / f"pages/{page}"))
     state = {
         "df": df,
         "continuous_cols": [
@@ -46,8 +50,8 @@ def test_supported_page_starts_with_synthetic_data(page):
     ],
 )
 def test_temporal_views_offer_explanation_and_image_download(mode, expected_subheader):
-    df = pd.read_csv("tests/data/synthetic_clinical.csv")
-    app = AppTest.from_file("pages/Temporal-Dynamics.py")
+    df = pd.read_csv(PROJECT_ROOT / "tests/data/synthetic_clinical.csv")
+    app = AppTest.from_file(str(PROJECT_ROOT / "pages/Temporal-Dynamics.py"))
     state = {
         "df": df,
         "continuous_cols": ["outcome", "marker_T1", "marker_T2"],
