@@ -6,7 +6,15 @@ import scikit_posthocs as sp
 from srcs.utils_features.data_description import build_continuous_summary_table
 from srcs.utils_features.responder_analysis import calculate_swc_te, icc_31_from_two_timepoints
 from srcs.utils_visualisation.common import run_group_test
-from srcs.utils_visualisation.temporal_stats import summarize_median_trajectory
+from srcs.utils_visualisation.group_comparison_plots import (
+    build_group_method_explanation,
+    format_group_summary,
+)
+from srcs.utils_visualisation.temporal_stats import (
+    build_temporal_explanation,
+    safe_temporal_filename,
+    summarize_median_trajectory,
+)
 
 
 def test_icc_absolute_agreement_reference_cases():
@@ -77,6 +85,35 @@ def test_constant_group_data_are_reported_explicitly():
     assert "no group test" in result["data_warning"]
 
 
+def test_group_summary_explains_automatic_and_welch_selection():
+    df = pd.DataFrame({
+        "g": ["a"] * 6 + ["b"] * 6,
+        "y": [1.0, 1.1, 0.9, 1.05, 0.95, 1.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0],
+    })
+    result = run_group_test(df, "g", "y", method="parametric")
+    explanation = build_group_method_explanation(result)
+    assert "Parametric (explicit override)" in explanation
+    assert "Levene's variance test" in explanation
+    assert "Welch unequal-variance inference" in explanation
+
+    summary = format_group_summary(result, "g", "y")
+    assert "Statistical method used" in summary
+    assert result["overall_test"] in summary
+    assert "independent groups" in summary
+
+
+def test_group_summary_explains_nonparametric_rank_interpretation():
+    df = pd.DataFrame({
+        "g": np.repeat(["a", "b", "c"], 4),
+        "y": [1, 1, 2, 9, 2, 3, 3, 10, 4, 4, 5, 11],
+    })
+    result = run_group_test(df, "g", "y", method="nonparametric")
+    explanation = build_group_method_explanation(result)
+    assert "Non-parametric (explicit override)" in explanation
+    assert "compare ranks" in explanation
+    assert "Dunn's comparisons" in explanation
+
+
 def test_temporal_bootstrap_edge_cases_and_participant_resampling():
     df = pd.DataFrame({
         "family": ["x"] * 7, "time": [1, 1, 1, 2, 2, 3, 4],
@@ -91,3 +128,15 @@ def test_temporal_bootstrap_edge_cases_and_participant_resampling():
     assert constant["ci_low"] == constant["ci_high"] == 7
     assert singleton["ci_low"] == singleton["ci_high"] == 9
     assert 4 not in set(out.time)
+
+
+def test_temporal_explanation_matches_baseline_and_interval_settings():
+    normalized = build_temporal_explanation("Yes", "95% bootstrap CI", "participant_id")
+    assert "value / baseline × 100" in normalized["baseline"]
+    assert "participant_id" in normalized["baseline"]
+    assert "2,000 participant-level resamples" in normalized["interval"]
+
+    raw_iqr = build_temporal_explanation("No", "IQR")
+    assert "imported measurement units" in raw_iqr["baseline"]
+    assert "not a confidence interval" in raw_iqr["interval"]
+    assert safe_temporal_filename("Blood pressure / arm A") == "Blood_pressure_arm_A"

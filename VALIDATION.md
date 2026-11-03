@@ -7,7 +7,7 @@
 - Starting commit: `6475526`
 - Operating context: Linux, Python 3.12.9
 - Command: `MPLCONFIGDIR=/tmp/clasp-mpl .venv/bin/pytest -q`
-- Outcome: 25 passed
+- Outcome: 30 passed
 - Static check: `python -m compileall -q public_app.py pages srcs` passed
 - Citation check: `cffconvert --validate` passed against CFF schema 1.2.0
 
@@ -31,6 +31,10 @@ group tests and Dunn comparisons, correlation display filtering, conventional an
 HC3 OLS reference calculations, regression explanations, ICC(A,1), responder error
 intervals, temporal median bootstrap summaries, Matplotlib export identity, metadata
 consistency, and application startup through Streamlit's test harness.
+The temporal UI smoke checks also verify that both temporal views expose their
+baseline/interval explanation and at least one image-download control.
+Group-comparison tests verify that the requested method policy, automatic checks,
+variance decision, rank interpretation, and selected omnibus test are reported.
 
 ## Limits
 

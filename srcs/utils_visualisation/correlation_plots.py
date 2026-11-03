@@ -50,7 +50,7 @@ def plot_correlation_heatmap_with_significance_plotly(
     height: int = 900,
     show_text: bool = True,
     # wrap_width: int = 18,
-    keep_diagonal: bool = True,
+    keep_diagonal: bool = False,
 ):
     """
     Plot a full correlation heatmap with significance stars using Plotly.
@@ -107,7 +107,7 @@ def plot_correlation_heatmap_with_significance_plotly(
             y=list(z.index),
             text=text.values if show_text else None,
             texttemplate="%{text}" if show_text else None,
-            textfont={"size": 7},
+            textfont={"size": 10},
             colorscale="RdBu_r",
             zmin=-1,
             zmax=1,
@@ -126,9 +126,8 @@ def plot_correlation_heatmap_with_significance_plotly(
     )
 
     fig.update_layout(
-        title=dict(text=f"{title} (displaying |r| ≥ {min_abs_corr:.2f}; diagonal {'kept' if keep_diagonal else 'hidden'})",
-                   x=0.25,
-                   font=dict(color=LABEL_COLOR),),
+        title=dict(text=f"{title} (|r| ≥ {min_abs_corr:.2f})",
+                   x=0.3, font=dict(color=LABEL_COLOR),),
         width=width,
         height=height,
         template="simple_white", #"plotly_white",

@@ -16,6 +16,93 @@ from srcs.utils_visualisation.common import (
     set_paper_plot_style,
 )
 
+
+METHOD_MODE_GUIDANCE = {
+    "Automatic": (
+        "Assumptions are checked separately for each outcome. If every group has "
+        "3–5,000 non-constant observations and Shapiro–Wilk p ≥ 0.05, CLASP uses "
+        "the parametric route; otherwise it uses the non-parametric route."
+    ),
+    "Parametric": (
+        "Forces tests of group means. Two groups use Student's or Welch's independent "
+        "t-test; three or more groups use one-way or Welch's ANOVA. Levene's test "
+        "selects the equal-variance or Welch version."
+    ),
+    "Non-parametric": (
+        "Forces rank-based tests. Two groups use Mann–Whitney U; three or more groups "
+        "use Kruskal–Wallis followed by Dunn's pairwise comparisons."
+    ),
+}
+
+
+def _format_assumption_pvalue(value):
+    """Format an assumption-check p-value for explanatory text."""
+    if value is None or not np.isfinite(value):
+        return "not available"
+    return "<0.001" if value < 0.001 else f"{value:.3f}"
+
+
+def build_group_method_explanation(result):
+    """Describe how the statistical method was requested and selected."""
+    policy = result.get("selection_policy", "auto")
+    selected = result.get("selected_method", "unknown")
+    policy_labels = {
+        "auto": "Automatic",
+        "parametric": "Parametric (explicit override)",
+        "nonparametric": "Non-parametric (explicit override)",
+    }
+    lines = [
+        f"**Method selection:** {policy_labels.get(policy, policy)}; the resulting "
+        f"route for this outcome was **{selected}**."
+    ]
+
+    normality = result.get("normality_p") or {}
+    if policy == "auto":
+        normality_text = ", ".join(
+            f"{group}: {_format_assumption_pvalue(p_value)}"
+            for group, p_value in normality.items()
+        ) or "not available"
+        lines.append(
+            "Automatic selection used group-wise Shapiro–Wilk checks at α = 0.05 "
+            f"(p-values: {normality_text}). All eligible groups must have p ≥ 0.05 "
+            "for the parametric route; unavailable checks route to non-parametric tests."
+        )
+    elif policy == "parametric":
+        lines.append(
+            "The parametric route was requested explicitly, so normality checks did not "
+            "change the test family. Group distributions and outliers should still be reviewed."
+        )
+    else:
+        lines.append(
+            "The non-parametric route was requested explicitly. These tests compare ranks "
+            "and distributional location; they should not automatically be described as tests "
+            "of means or medians."
+        )
+
+    if selected == "parametric":
+        levene_p = result.get("levene_p", np.nan)
+        if np.isfinite(levene_p) and levene_p >= 0.05:
+            variance_choice = "equal variances were retained"
+        else:
+            variance_choice = "Welch unequal-variance inference was selected"
+        lines.append(
+            f"Levene's variance test p = {_format_assumption_pvalue(levene_p)}; "
+            f"{variance_choice} for the overall test. Pairwise t-tests perform their own "
+            "two-group variance check."
+        )
+    else:
+        lines.append(
+            "Levene's variance test is not used to select rank-based tests. With three or "
+            "more groups, Dunn's comparisons form one pairwise family for this outcome."
+        )
+
+    lines.append(
+        "All tests on this page are for independent groups. Missing or infinite values are "
+        "removed for the current outcome, and any selected transformation is applied before "
+        "testing. Automatic selection is a convenience rather than proof that assumptions hold."
+    )
+    return "\n\n".join(lines)
+
 def _prepare_group_data(df, group_col, y_col, selected_groups=None):
     sub = df[[group_col, y_col]].copy()
     sub[y_col] = pd.to_numeric(sub[y_col], errors="coerce")
@@ -292,6 +379,9 @@ def format_group_summary(result, group_col, y_col):
     if result.get("data_warning"):
         txt += f"\n{result['data_warning']}\n"
 
+    txt += "\n### Statistical method used\n\n"
+    txt += build_group_method_explanation(result) + "\n\n"
+
     if pd.isna(overall_p):
         txt += f"Overall test {overall_test} failed (no valid p-value).\n"
     elif overall_p < 0.05:
@@ -397,8 +487,12 @@ def render_group_comparison_page(df, continuous_cols, group_col):
 
             **How the statistics work**
             - For each selected variable, the app prepares valid numeric data and removes missing or infinite values.
-            - Tests compare independent groups. Automatic selection uses Shapiro–Wilk, then Levene's test to choose Student versus Welch methods; otherwise it uses Mann–Whitney or Kruskal–Wallis/Dunn.
-            - You can explicitly request parametric or non-parametric methods. Automatic assumption checks are a convenience and can be fragile for very small or very large samples.
+            - Tests compare **independent groups**; this page does not perform paired or repeated-measures comparisons.
+            - **Automatic:** selection is repeated for each outcome. Every group must have 3–5,000 non-constant observations and a Shapiro–Wilk p-value ≥ 0.05 to use the parametric route. If a check is unavailable or p < 0.05, the non-parametric route is used.
+            - **Parametric:** compares group means. For two groups, CLASP uses Student's independent t-test when Levene's test supports equal variance and Welch's t-test otherwise. For three or more groups it uses ordinary one-way ANOVA or Welch's ANOVA by the same variance rule.
+            - **Non-parametric:** compares ranks/distributional location. Two groups use Mann–Whitney U. Three or more groups use Kruskal–Wallis, followed by Dunn's pairwise comparisons.
+            - For three or more groups, pairwise p-values are Bonferroni-adjusted within the comparisons for the current outcome. This does not correct across all selected outcome variables.
+            - Parametric overrides do not guarantee that assumptions are satisfied. Non-parametric significance should not automatically be interpreted as a difference in medians unless distribution shapes are comparable.
             - If pairwise comparisons are available, significant group differences are drawn above the plot as brackets with significance stars.
             - The plot title shows the omnibus test and p-value for the current variable and transformation.
 
@@ -462,6 +556,7 @@ def render_group_comparison_page(df, continuous_cols, group_col):
             "Automatic": "auto", "Parametric": "parametric",
             "Non-parametric": "nonparametric",
         }[method_label]
+        st.caption(METHOD_MODE_GUIDANCE[method_label])
 
 
 

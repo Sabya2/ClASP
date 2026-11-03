@@ -8,7 +8,12 @@ import pandas as pd
 import streamlit as st
 
 from srcs.utils_features.common import get_repeated_measure_families
-from srcs.utils_visualisation.temporal_stats import summarize_median_trajectory
+from srcs.utils_visualisation.common import get_figure_download
+from srcs.utils_visualisation.temporal_stats import (
+    build_temporal_explanation,
+    safe_temporal_filename,
+    summarize_median_trajectory,
+)
 
 
 def render_molecular_temporal_dynamics(df, group_col, participants_col=None):
@@ -206,12 +211,26 @@ def render_molecular_temporal_dynamics(df, group_col, participants_col=None):
         "per timepoint. Bootstrap intervals resample participant-level values; n=1 and constant cells "
         "have zero-width intervals. Baseline normalization uses each participant's first observed value."
     )
+    explanation = build_temporal_explanation(
+        normalise=normalise,
+        interval_kind=error_type,
+        participant_col=participants_col,
+    )
+    with st.expander("How baseline and interval settings are interpreted", expanded=False):
+        st.markdown("**Baseline handling**")
+        st.write(explanation["baseline"])
+        st.markdown(f"**{error_type}**")
+        st.write(explanation["interval"])
+        st.markdown("**Interpretation limits**")
+        st.write(explanation["limits"])
 
     for row_start in range(0, len(selected_groups), ncols):
         cols = st.columns(ncols)
         row_groups = selected_groups[row_start: row_start + ncols]
 
-        for col_container, family_key in zip(cols, row_groups):
+        for plot_index, (col_container, family_key) in enumerate(
+            zip(cols, row_groups), start=row_start
+        ):
             with col_container:
                 var_name = family_labels[family_key]
                 sub_var = agg_df[agg_df["Variable"] == var_name].copy()
@@ -290,6 +309,15 @@ def render_molecular_temporal_dynamics(df, group_col, participants_col=None):
 
                 plt.tight_layout()
                 st.pyplot(fig)
+                plot_buffer = get_figure_download(fig)
+                safe_name = safe_temporal_filename(var_name)
+                st.download_button(
+                    label=f"Download {var_name} plot (.png)",
+                    data=plot_buffer,
+                    file_name=f"temporal_within_{safe_name}.png",
+                    mime="image/png",
+                    key=f"temporal_within_plot_download_{plot_index}_{safe_name}",
+                )
                 plt.close(fig)
 
     st.subheader("Long-form data")

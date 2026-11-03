@@ -1,7 +1,74 @@
 """Testable descriptive summaries for temporal plots."""
 
+import re
+import hashlib
+
 import numpy as np
 import pandas as pd
+
+
+def build_temporal_explanation(normalise, interval_kind, participant_col=None):
+    """Return context-sensitive explanations for temporal plot settings."""
+    if normalise not in {"Yes", "No"}:
+        raise ValueError("normalise must be 'Yes' or 'No'")
+
+    if normalise == "Yes":
+        participant_text = (
+            f" using participant identifier `{participant_col}`"
+            if participant_col else ""
+        )
+        baseline = (
+            "Each participant's first available numeric value in the selected family, "
+            f"ordered by detected timepoint, is used as baseline{participant_text}. "
+            "Values are shown as value / baseline × 100, so 100 represents that "
+            "participant's baseline. A zero or missing baseline cannot be normalized; "
+            "those normalized observations are omitted."
+        )
+    else:
+        baseline = (
+            "Baseline normalization is off. Values remain in their imported measurement "
+            "units, and each plotted point is the median of the available values at that "
+            "timepoint."
+        )
+
+    interval_explanations = {
+        "95% bootstrap CI": (
+            "The interval is a pointwise 95% percentile bootstrap confidence interval "
+            "for the median, based on 2,000 participant-level resamples. It describes "
+            "sampling uncertainty around the median; it is not an interval for an "
+            "individual participant. Singleton and constant cells have zero-width intervals."
+        ),
+        "IQR": (
+            "The bars span Q1 to Q3, the middle 50% of observed participant values. "
+            "The IQR describes data spread and is not a confidence interval or standard error."
+        ),
+        "SD (descriptive spread)": (
+            "The bars show one sample standard deviation on either side of the displayed "
+            "median. SD describes observed spread; it is not a standard error or confidence interval."
+        ),
+    }
+    if interval_kind not in interval_explanations:
+        raise ValueError("Unsupported temporal interval kind")
+
+    return {
+        "baseline": baseline,
+        "interval": interval_explanations[interval_kind],
+        "limits": (
+            "Missing measurements are omitted separately at each timepoint, so sample size "
+            "can change over time. These trajectories are descriptive and do not provide a "
+            "repeated-measures or longitudinal hypothesis test."
+        ),
+    }
+
+
+def safe_temporal_filename(value, max_length=100):
+    """Return a filesystem-friendly label for temporal plot downloads."""
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value)).strip("_.")
+    cleaned = cleaned or "temporal_plot"
+    if len(cleaned) > max_length:
+        suffix = hashlib.sha256(cleaned.encode("utf-8")).hexdigest()[:8]
+        cleaned = f"{cleaned[:max_length - 9]}_{suffix}"
+    return cleaned
 
 
 def summarize_median_trajectory(

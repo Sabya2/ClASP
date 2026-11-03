@@ -618,14 +618,14 @@ def _render_univariate_ols_section(df, continuous_cols, categorical_cols, group_
     st.markdown("### Univariate OLS")
 
     v1, v2 = st.columns([1, 1], border=True, gap="small")
-    with v1:
+    with v2:
         x_cols = st.multiselect("(X) Predictor variable(s)",
             options=continuous_cols,
             default=continuous_cols[:1],
             key="uniols_x_multiselect",
         )
 
-    with v2:
+    with v1:
         possible_y = [col for col in continuous_cols if col not in x_cols]
         y_cols = st.multiselect("(Y) Outcome variable(s)",
             options=possible_y,

@@ -8,7 +8,12 @@ import pandas as pd
 import streamlit as st
 
 from srcs.utils_features.common import get_repeated_measure_families
-from srcs.utils_visualisation.temporal_stats import summarize_median_trajectory
+from srcs.utils_visualisation.common import get_figure_download
+from srcs.utils_visualisation.temporal_stats import (
+    build_temporal_explanation,
+    safe_temporal_filename,
+    summarize_median_trajectory,
+)
 
 
 def _family_labels(temporal_families):
@@ -241,6 +246,18 @@ def render_vascular_temporal_dynamics(
         "(2,000 participant-level resamples), not repeated-measures hypothesis tests. Missing values "
         "are omitted per timepoint; singleton and constant cells have zero-width intervals."
     )
+    explanation = build_temporal_explanation(
+        normalise=normalise,
+        interval_kind="95% bootstrap CI",
+        participant_col=participants_col,
+    )
+    with st.expander("How baseline and interval settings are interpreted", expanded=False):
+        st.markdown("**Baseline handling**")
+        st.write(explanation["baseline"])
+        st.markdown("**95% bootstrap confidence interval**")
+        st.write(explanation["interval"])
+        st.markdown("**Interpretation limits**")
+        st.write(explanation["limits"])
 
     available_plot_labels = set(agg_df["Family"])
     selected_labels = [
@@ -367,6 +384,16 @@ def render_vascular_temporal_dynamics(
 
         fig.tight_layout(rect=(0, 0, 0.80, 1))
         st.pyplot(fig, width="stretch")
+        plot_buffer = get_figure_download(fig)
+        family_stem = safe_temporal_filename("_".join(plot_families))
+        layout_stem = "combined" if plot_mode == "Combined" else f"batch_{plot_number}"
+        st.download_button(
+            label=f"Download temporal plot {plot_number} (.png)",
+            data=plot_buffer,
+            file_name=f"temporal_cross_{layout_stem}_{family_stem}.png",
+            mime="image/png",
+            key=f"temporal_cross_plot_download_{plot_number}_{layout_stem}",
+        )
         plt.close(fig)
 
     with st.expander("Show temporal summary", expanded=False):
