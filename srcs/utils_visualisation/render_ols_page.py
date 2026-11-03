@@ -56,6 +56,9 @@ def _term_to_readable(term):
 
 def _reference_category(data, variable):
     """Infer the treatment reference category used by patsy/statsmodels."""
+    if isinstance(data[variable].dtype, pd.CategoricalDtype):
+        categories = data[variable].dtype.categories
+        return categories[0] if len(categories) else "NA"
     values = data[variable].dropna().unique().tolist()
     if not values:
         return "NA"
@@ -68,7 +71,7 @@ def _reference_category(data, variable):
 
 
 def _fit_ols_model(data, outcome, predictors, primary_predictors, categorical_vars, robust_se=False):
-    """Fit one OLS model, returning the fitted model and formula."""
+    """Fit OLS once with conventional or HC3 covariance and finite-sample t inference."""
     formula_terms = []
 
     for var in predictors:
@@ -77,26 +80,31 @@ def _fit_ols_model(data, outcome, predictors, primary_predictors, categorical_va
         else:
             formula_terms.append(var)
     formula = f"{outcome} ~ " + " + ".join(formula_terms)
-    model = smf.ols(formula, data=data).fit(cov_type="HC3")
-    if robust_se:
-        model = model.get_robustcov_results(cov_type="HC3")
+    if not predictors:
+        raise ValueError("At least one predictor is required.")
+    model = smf.ols(formula, data=data).fit(
+        cov_type="HC3" if robust_se else "nonrobust",
+        use_t=True,
+    )
     return model, formula
 
 def _model_terms_table(model):
     """Return an OLS coefficient table excluding the intercept."""
-    ci = model.conf_int()
+    term_names = list(model.model.exog_names)
+    ci = pd.DataFrame(model.conf_int(), index=term_names)
     table = pd.DataFrame({
-        "term": model.params.index,
-        "beta": model.params.values,
-        "std_error": model.bse.values,
-        "t_value": model.tvalues.values,
-        "p_value": model.pvalues.values,
+        "term": term_names,
+        "beta": np.asarray(model.params),
+        "std_error": np.asarray(model.bse),
+        "t_value": np.asarray(model.tvalues),
+        "p_value": np.asarray(model.pvalues),
         "ci_low": ci.iloc[:, 0].values,
         "ci_high": ci.iloc[:, 1].values,
     })
     table = table.loc[table["term"] != "Intercept"].copy()
     table["term_display"] = table["term"].map(_term_to_readable)
     table["significance"] = table["p_value"].map(p_to_star)
+    table["statistic"] = "t"
     return table
 
 
@@ -148,17 +156,18 @@ def _extract_primary_coefficients(model, outcome, primary_predictors):
 def _build_equation(model, outcome, categorical_vars):
     """Build a readable fitted-regression equation with categorical terms grouped."""
 
-    intercept = float(model.params.get("Intercept", 0.0))
+    params = pd.Series(np.asarray(model.params), index=model.model.exog_names)
+    intercept = float(params.get("Intercept", 0.0))
 
     continuous_lines = []
     categorical_lines = {}
 
-    for term, beta in model.params.items():
+    for term, beta in params.items():
         if term == "Intercept":
             continue
 
         sign = "+" if beta >= 0 else "−"
-        piece = f"{sign}{abs(beta):.3f}×({_term_to_readable(term)})"
+        piece = f"{sign}{abs(beta):.6g}×({_term_to_readable(term)})"
 
         # Check whether this term belongs to a categorical variable
         matched_category = None
@@ -174,7 +183,7 @@ def _build_equation(model, outcome, categorical_vars):
             continuous_lines.append(piece)
 
     # Start with intercept
-    lines = [f"{outcome} = {intercept:.3f}"]
+    lines = [f"{outcome} = {intercept:.6g}"]
 
     # Add ALL continuous predictors first
     if continuous_lines:
@@ -200,20 +209,24 @@ def _coefficient_interpretation(term, beta, ci_low, ci_high, p_value, outcome,
         reference = _reference_category(data, variable)
         lead = (
             f"Compared with {variable} = {reference} (reference), {variable} = {exposed_level} "
-            f"was associated with a {abs(beta):.3f}-unit {direction} {outcome}"
+            f"was associated with a {abs(beta):.6g}-unit {direction} {outcome}"
         )
     elif term in additional_covars:
-        lead = f"Compared with the reference category, {readable_term} was associated with a {abs(beta):.3f}-unit {direction} {outcome}"
+        lead = (
+            f"For each one-unit increase in {readable_term}, {outcome} was estimated to be "
+            f"{abs(beta):.6g} units {direction}"
+        )
     else:
         lead = (
             f"For each one-unit increase in {readable_term}, {outcome} was estimated to be "
-            f"{abs(beta):.3f} units {direction}"
+            f"{abs(beta):.6g} units {direction}"
         )
 
     return (
         f"{lead}, conditional on all other variables in the model "
-        f"(beta = {beta:.3f}, 95% CI {ci_low:.3f} to {ci_high:.3f}, "
-        f"p = {_format_pvalue(p_value)}; {significant_text})."
+        f"(beta = {beta:.6g}, 95% CI {ci_low:.6g} to {ci_high:.6g}, "
+        f"p = {_format_pvalue(p_value)}; {significant_text}). Statistical "
+        "significance does not establish practical importance or causality."
     )
 
 
@@ -249,6 +262,8 @@ def _build_model_explanation(model, outcome, predictors,
         "significant_terms": significant_terms,
         "coefficient_table": coefficient_table,
         "coefficient_text": coefficient_text,
+        "covariance_type": "HC3 robust" if model.cov_type == "HC3" else "Conventional OLS",
+        "inference_distribution": "Student t",
     }
     return summary
 
@@ -458,6 +473,10 @@ def _render_explanation(explanation, outcome, analysis_mode="Multivariable OLS")
     st.caption(
         "The equation is a fitted conditional mean model. For categorical variables, "
         "the displayed coefficient corresponds to the treatment-coded contrast against its reference level."
+    )
+    st.caption(
+        f"Covariance: {explanation['covariance_type']}; confidence intervals and p-values "
+        f"use the {explanation['inference_distribution']} distribution."
     )
 
     metric_1, metric_2, metric_3, metric_4 = st.columns(4)
@@ -817,8 +836,15 @@ def _render_univariate_ols_section(df, continuous_cols, categorical_cols, group_
 
                             try:
                                 # Use the same model fitting approach as multivariable OLS
-                                grp_model, grp_formula = _fit_ols_model(grp_df, y_col, [x_col], [], robust_se=False)
-                                grp_explanation = _build_model_explanation(grp_model, y_col, [x_col], [], grp_df, grp_formula)
+                                grp_model, grp_formula = _fit_ols_model(
+                                    data=grp_df, outcome=y_col, predictors=[x_col],
+                                    primary_predictors=[x_col], categorical_vars=[], robust_se=False,
+                                )
+                                grp_explanation = _build_model_explanation(
+                                    model=grp_model, outcome=y_col, predictors=[x_col],
+                                    additional_covars=[], categorical_vars=[], data=grp_df,
+                                    formula=grp_formula,
+                                )
 
                                 # Get correlation for additional context
                                 grp_r, grp_p = _corr_pair(grp_df[x_col], grp_df[y_col], method="pearson")
@@ -826,7 +852,7 @@ def _render_univariate_ols_section(df, continuous_cols, categorical_cols, group_
                                 # Build equation string
                                 sign = "+" if grp_explanation["coefficient_table"]["beta"].iloc[0] >= 0 else "-"
                                 beta_val = abs(grp_explanation["coefficient_table"]["beta"].iloc[0])
-                                intercept_val = grp_explanation["coefficient_table"]["intercept"].iloc[0] if "intercept" in grp_explanation["coefficient_table"].columns else grp_model.params["Intercept"]
+                                intercept_val = float(np.asarray(grp_model.params)[0])
                                 equation = f"{y_col} = {intercept_val:.3f} {sign} {beta_val:.3f} \u00d7 {x_col}"
 
                                 # Format significance stars

@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from srcs.utils_features.common import get_repeated_measure_families
+from srcs.utils_visualisation.temporal_stats import summarize_median_trajectory
 
 
 def _family_labels(temporal_families):
@@ -230,19 +231,16 @@ def render_vascular_temporal_dynamics(
     else:
         long_df[plot_group_col] = long_df[analysis_group_col]
 
-    agg_df = (
-        long_df
-        .groupby(["Family", plot_group_col, "Time"], dropna=False)
-        .agg(
-            median=("Value", "median"),
-            std=("Value", "std"),
-            n=("Value", "count"),
-        )
-        .reset_index()
+    agg_df = summarize_median_trajectory(
+        long_df,
+        ["Family", plot_group_col, "Time"],
+        participant_col=participants_col,
     )
-    agg_df["std"] = agg_df["std"].fillna(0)
-    agg_df["sem"] = agg_df["std"] / np.sqrt(agg_df["n"].clip(lower=1))
-    agg_df["ci"] = 1.96 * agg_df["sem"]
+    st.caption(
+        "Lines show descriptive medians with 95% percentile bootstrap confidence intervals "
+        "(2,000 participant-level resamples), not repeated-measures hypothesis tests. Missing values "
+        "are omitted per timepoint; singleton and constant cells have zero-width intervals."
+    )
 
     available_plot_labels = set(agg_df["Family"])
     selected_labels = [
@@ -290,7 +288,8 @@ def render_vascular_temporal_dynamics(
                 group_df = group_df.sort_values("Time")
                 x_values = group_df["Time"].to_numpy(dtype=float)
                 median_values = group_df["median"].to_numpy(dtype=float)
-                ci_values = group_df["ci"].to_numpy(dtype=float)
+                ci_low = group_df["ci_low"].to_numpy(dtype=float)
+                ci_high = group_df["ci_high"].to_numpy(dtype=float)
                 color = family_colors[family_label]
                 legend_label = (
                     family_label
@@ -313,8 +312,8 @@ def render_vascular_temporal_dynamics(
                 )
                 ax.fill_between(
                     x_values,
-                    median_values - ci_values,
-                    median_values + ci_values,
+                    ci_low,
+                    ci_high,
                     color=color,
                     alpha=0.16,
                     linewidth=0,
@@ -382,9 +381,18 @@ def render_vascular_temporal_dynamics(
                 "Population" if aggregate_all_participants else analysis_group_col,
                 "Time",
                 "median",
-                "ci",
+                "ci_low",
+                "ci_high",
                 "n",
+                "interval_method",
             ]],
             width="stretch",
             hide_index=True,
+        )
+        st.download_button(
+            "Download temporal median summary (.csv)",
+            summary.to_csv(index=False).encode("utf-8"),
+            "cross_family_median_bootstrap_summary.csv",
+            "text/csv",
+            key="temporal_cross_summary_download",
         )

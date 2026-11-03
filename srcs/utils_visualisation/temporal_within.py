@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from srcs.utils_features.common import get_repeated_measure_families
+from srcs.utils_visualisation.temporal_stats import summarize_median_trajectory
 
 
 def render_molecular_temporal_dynamics(df, group_col, participants_col=None):
@@ -113,8 +114,8 @@ def render_molecular_temporal_dynamics(df, group_col, participants_col=None):
 
     with col2:
         error_type = st.radio(
-            "Error bars",
-            options=["SD", "CI (95%)", "SE"],
+            "Median interval / spread",
+            options=["95% bootstrap CI", "IQR", "SD (descriptive spread)"],
             horizontal=False
         )
 
@@ -195,24 +196,16 @@ def render_molecular_temporal_dynamics(df, group_col, participants_col=None):
     else:
         long_df[plot_group_col] = long_df[analysis_group_col]
 
-    agg_df = (
-        long_df
-        .groupby(["Variable", plot_group_col, "Time"], dropna=False)
-        .agg(
-            median=("Value", "median"),
-            std=("Value", "std"),
-            n=("Value", "count"),
-            q1=("Value", lambda x: x.quantile(0.25)),
-            q3=("Value", lambda x: x.quantile(0.75))
-        )
-        .reset_index()
+    agg_df = summarize_median_trajectory(
+        long_df,
+        ["Variable", plot_group_col, "Time"],
+        participant_col=participants_col,
     )
-
-    agg_df["std"] = agg_df["std"].fillna(0)
-    agg_df["sem"] = agg_df["std"] / np.sqrt(agg_df["n"])
-    agg_df["ci"] = 1.96 * agg_df["sem"]
-    agg_df["iqr_lower"] = agg_df["median"] - agg_df["q1"]
-    agg_df["iqr_upper"] = agg_df["q3"] - agg_df["median"]
+    st.caption(
+        "Points are descriptive medians, not longitudinal hypothesis tests. Missing values are omitted "
+        "per timepoint. Bootstrap intervals resample participant-level values; n=1 and constant cells "
+        "have zero-width intervals. Baseline normalization uses each participant's first observed value."
+    )
 
     for row_start in range(0, len(selected_groups), ncols):
         cols = st.columns(ncols)
@@ -249,12 +242,12 @@ def render_molecular_temporal_dynamics(df, group_col, participants_col=None):
                         zorder=3,
                     )
 
-                    if error_type == "SD":
-                        err = sub["std"]
-                    elif error_type == "CI (95%)":
-                        err = sub["ci"]
+                    if error_type == "95% bootstrap CI":
+                        err = np.vstack((sub["median"] - sub["ci_low"], sub["ci_high"] - sub["median"]))
+                    elif error_type == "IQR":
+                        err = np.vstack((sub["median"] - sub["q1"], sub["q3"] - sub["median"]))
                     else:
-                        err = sub["sem"]
+                        err = sub["std"].fillna(0)
 
                     ax.errorbar(
                         x_vals,
@@ -330,29 +323,20 @@ def render_molecular_temporal_dynamics(df, group_col, participants_col=None):
 
     show_summary = st.checkbox("Show summary table")
     if show_summary:
-        summary_group_cols = (
-            ["Variable", "Time"]
-            if aggregate_all_participants
-            else ["Variable", analysis_group_col, "Time"]
-        )
-        summary_df = (
-            long_df
-            .groupby(summary_group_cols, dropna=False)
-            .agg(
-                median_value=("Value", "median"),
-                q1=("Value", lambda x: x.quantile(0.25)),
-                q3=("Value", lambda x: x.quantile(0.75)),
-                n=("Value", "count")
-            )
-            .reset_index()
-            .sort_values(summary_group_cols)
-        )
+        summary_df = agg_df.rename(columns={plot_group_col: "Population" if aggregate_all_participants else analysis_group_col})
         if aggregate_all_participants:
-            summary_df.insert(1, "Population", "All participants")
+            summary_df["Population"] = "All participants"
 
         st.dataframe(
             summary_df,
             width="stretch",
             height=300,
             hide_index=True
+        )
+        st.download_button(
+            "Download temporal median summary (.csv)",
+            summary_df.to_csv(index=False).encode("utf-8"),
+            "temporal_median_bootstrap_summary.csv",
+            "text/csv",
+            key="temporal_within_summary_download",
         )

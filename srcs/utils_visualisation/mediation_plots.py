@@ -258,7 +258,7 @@ def render_mediation_page(df, continuous_cols, categorical_cols, group_col=None)
                 - **Path b / direct model**: `Y ~ M + X (+ covariates)`
                 - **Total effect**: `Y ~ X (+ covariates)`
 
-                The implementation uses ordinary least squares regression with formula-based model fitting from Statsmodels. [web:33][web:39]
+                The implementation uses ordinary least squares regression with formula-based model fitting from Statsmodels.
 
                 **What the reported effects mean**
                 - **Total effect (c)**: the overall association between X and Y.

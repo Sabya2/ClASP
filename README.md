@@ -1,21 +1,41 @@
-# ClASPx
+# CLASP
 
-## Clinical and Statistical Analysis Platform eXplorer
+## CLinical and Statistical Analysis Software Platform
 
-ClASPx is a Streamlit-based platform for exploratory clinical and statistical data analysis. It is designed to help users inspect relationships between variables, fit statistical models, and evaluate individual responses to an intervention.
+CLASP is a Streamlit-based platform for exploratory clinical and statistical data analysis. It is designed to help users inspect relationships between variables, fit statistical models, and evaluate individual responses to an intervention.
 
-> **Important:** ClASPx supports statistical analysis but does not replace careful study design, domain expertise, diagnostic checks, or independent statistical review. Results should be interpreted in the context of the study design and data quality.
+> **Important:** CLASP supports statistical analysis but does not replace careful study design, domain expertise, diagnostic checks, or independent statistical review. Results should be interpreted in the context of the study design and data quality.
+
+Current development version: `0.1.0-dev`. This is not yet a tagged release.
+
+## Installation and launch
+
+CLASP supports Python 3.11 and 3.12. In a clean environment:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+streamlit run public_app.py
+```
+
+For validation and development, install `requirements-dev.txt` and run `pytest -q`.
+Citation validation has a separate `requirements-metadata.txt` environment because
+the validator uses an older JSON-schema dependency.
+The CI suite exercises both supported Python versions. PNG export from Plotly uses
+Kaleido; HTML export remains available if local PNG rendering is unavailable.
 
 ## Quick start
 
-1. Prepare a CSV or Excel file using the input requirements below and upload the file in ClASPx.
+1. Prepare a CSV or Excel file using the input requirements below and upload the file in CLASP.
 2. Check that the columns have been detected correctly.
 3. Select the variables and analysis options on the relevant page.
 4. Download results where available.
 
 ## Input data with Minimum structure
 
-ClASPx accepts:
+CLASP accepts:
 
 - CSV files (`.csv`).
 - Excel files (`.xlsx` or `.xls`).
@@ -77,13 +97,13 @@ Missing values should be left blank or represented consistently. Do not mix seve
 - Incase of `Excel` avoid merged cells, title rows above the header, and multiple tables on one worksheet.
 - Do not upload names, addresses, patient numbers, or other directly identifying information unless this is explicitly permitted by your governance and data-protection procedures.
 
-<!-- ### Excel recommendations
+### Excel recommendations
 
 For Excel files:
 
 - Avoid merged cells, title rows above the header, and multiple tables on one worksheet.
 - Store numeric measurements as numeric cells rather than formatted text.
-- Remove formulas or confirm that the uploaded workbook contains the intended calculated values. -->
+- Remove formulas or confirm that the uploaded workbook contains the intended calculated values.
 
 ## Missing data and data quality
 
@@ -97,7 +117,7 @@ Before analysis, check the **Data description** section:
 - Whether there are enough observations for each selected analysis or subgroup.
 - Whether extreme values and outliers are plausible.
 
-ClASPx may exclude incomplete rows for a specific analysis. Always review the reported sample size and the data-processing information shown with the results.
+CLASP may exclude incomplete rows for a specific analysis. Always review the reported sample size and the data-processing information shown with the results.
 
 
 ## Correlation page
@@ -105,7 +125,7 @@ ClASPx may exclude incomplete rows for a specific analysis. Always review the re
 The Correlation page calculates correlation matrices and displays them as interactive heatmaps.
 A correlation describes an association, not necessarily a causal relationship. Pearson correlation is most directly associated with linear relationships; Spearman and Kendall are rank-based methods for monotonic relationships.
 
-<!-- ### What to provide
+### What to provide
 
 - Two or more numeric variables.
 - An optional categorical grouping variable.
@@ -126,7 +146,7 @@ A correlation describes an association, not necessarily a causal relationship. P
 
 Selected columns are converted to numeric values before analysis. Correlations are calculated pairwise using available values. Variables or groups with insufficient valid data may be skipped.
 
-A correlation describes an association, not necessarily a causal relationship. Pearson correlation is most directly associated with linear relationships; Spearman and Kendall are rank-based methods for monotonic relationships. -->
+A correlation describes an association, not necessarily a causal relationship. Pearson correlation is most directly associated with linear relationships; Spearman and Kendall are rank-based methods for monotonic relationships.
 
 ## OLS regression page
 
@@ -140,7 +160,7 @@ The OLS Regression page provides three complementary views of linear relationshi
 2. Multivariable OLS regression.
 3. An interactive pair plot for one selected X–Y relationship.
 
-<!-- ### What to provide
+### What to provide
 
 - At least one numeric outcome variable (`Y`).
 - At least one numeric predictor variable (`X`).
@@ -178,13 +198,13 @@ Categorical predictors use treatment coding. Each displayed category is compared
 
 ### Robust standard errors
 
-The HC3 option changes standard errors, confidence intervals, and p-values. It does not change the estimated beta coefficients.
+The HC3 option changes standard errors, confidence intervals, and p-values. It does not change the estimated beta coefficients. Conventional and HC3 inference both use finite-sample Student t statistics in CLASP, and the selected covariance method is displayed with the result.
 
 ### Complete-case analysis
 
 For each model, rows with missing values in any selected outcome or predictor are excluded from that model. The number of observations can therefore differ between models.
 
-Always inspect linearity, residual patterns, influential observations, and multicollinearity before drawing strong conclusions from an OLS model. -->
+Always inspect linearity, residual patterns, influential observations, and multicollinearity before drawing strong conclusions from an OLS model.
 
 ## Responder Analysis page
 
@@ -193,7 +213,7 @@ The Responder Analysis page evaluates individual responses to an intervention us
 feature1_pre, feature1_post
 ```
 
-<!-- ### What to provide
+### What to provide
 
 - One participant identifier column.
 - Pre-intervention measurement columns.
@@ -225,21 +245,41 @@ Participants are classified as:
 
 The page provides individual classifications, responder plots, and downloadable results where available. If a group or participant does not contain sufficient valid information, the result may be omitted.
 
-Responder classifications depend on the selected SWC, typical error, confidence level, and measurement quality. They should be interpreted as statistical classifications rather than definitive biological labels. -->
+Responder classifications depend on the selected SWC, typical error, confidence level, and measurement quality. They should be interpreted as statistical classifications rather than definitive biological labels.
+
+## Group comparison page
+
+Group comparisons are for independent groups. The automatic policy checks each
+group with Shapiro–Wilk; if all groups have at least three observations and do not
+reject normality, it uses Student/Welch tests according to Levene's variance test.
+Otherwise it uses Mann–Whitney U (two groups) or Kruskal–Wallis followed by Dunn's
+post-hoc comparisons (three or more groups). Pairwise p-values use the displayed
+correction. Automatic selection is a convenience, not a substitute for design-based
+method choice or diagnostic review. Missing outcome/group values are excluded.
+
+## Temporal dynamics page
+
+Temporal plots show medians at each available timepoint. Their 95% intervals are
+percentile bootstrap confidence intervals for the median using 2,000 resamples of
+participant-level values. Single observations and constant cells produce zero-width
+intervals. Missing observations are omitted per timepoint. Optional baseline
+normalization divides each participant's value by their first available non-zero
+value within the family. These are descriptive trajectories, not longitudinal,
+mixed-effects, or repeated-measures hypothesis tests.
 
 
 ## Reproducibility and citation
 
-Record the following when using ClASPx:
+Record the following when using CLASP:
 
-- ClASPx version.
+- CLASP version.
 - Date of analysis.
 - Input-data preparation steps.
 - Selected variables.
 - Statistical method and options.
 - Grouping variable, if used.
 - Downloaded output files.
-- DOI of the specific ClASPx release, when available.
+- DOI of the specific CLASP release, when available.
 
 For a published study, cite the exact software version used rather than only the project homepage.
 
@@ -252,13 +292,13 @@ information in messages or attachments.
 
 ## Privacy and security
 
-Do not upload identifiable clinical data unless the use of the application is approved for that data. Prefer pseudonymous participant identifiers and synthetic or de-identified datasets for demonstrations. Review the ClASPx privacy notice for information about login data, uploaded files, usage tracking, and retention.
+Do not upload identifiable clinical data unless the use of the application is approved for that data. Prefer pseudonymous participant identifiers and synthetic or de-identified datasets for demonstrations. No standalone privacy notice is included in this repository; deployment owners must document storage, logging, access, and retention for their environment.
 
 ## Support
 
 When reporting an issue, include:
 
-- ClASPx version.
+- CLASP version.
 - Analysis page.
 - File type and approximate file size.
 - The selected analysis options.

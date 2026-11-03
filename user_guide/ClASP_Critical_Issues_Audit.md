@@ -2,7 +2,30 @@
 
 **Review date:** 1 October 2026  
 **Scope:** Static review performed while preparing the ClASP user guide  
-**Status:** Preliminary code audit; findings should be confirmed with automated and reference-data tests
+**Status:** Reconciled against the publication-readiness branch on 3 November 2026
+
+## Reconciliation with the current repository
+
+The historical text below is retained as an audit trail and describes the state
+observed at the original review. The current disposition is authoritative:
+
+| Historical finding | Disposition | Current evidence |
+|---|---|---|
+| Application source was untracked | Fixed before this reconciliation | Commit `6475526` contains the reviewed application; the new work is isolated on `publication-readiness-fixes`. |
+| Correlation threshold disconnected | Confirmed, fixed | The slider is passed as `min_abs_corr`; tests check 0, 0.3, and 0.8 with a fixed -1…1 colour scale. |
+| Categorical mediation covariates coerced to numeric | Still open | Mediation is not in the supported navigation and was outside the targeted correction set; do not claim it as validated. |
+| ICC mislabeled/incorrect | Confirmed, fixed | Responder code now implements and tests ICC(A,1), including the systematic-bias reference value 0.1549295775. |
+| Mean-style CI placed around temporal medians | Confirmed, fixed | Both temporal views use a documented participant-level percentile bootstrap CI for the median. |
+| Global group automatically selected without a global selector | Still open | Page-specific selectors exist, but a single global group selector remains an interface decision. |
+| Group-test selection differed by page | Confirmed, fixed for supported Data Summary and Group Comparison workflows | Both use `run_group_test`; display summary format no longer selects the hypothesis test. |
+| Figure export ignored the supplied figure | Confirmed, fixed | `fig.savefig` is used and regression tests distinguish two simultaneous figures. |
+| Categorical-summary p-values omitted | Fixed | Grouped categorical summaries include their chi-square p-value. |
+| No structured automated tests | Confirmed, fixed for targeted workflows | Synthetic tests cover loading, summaries, tests, correlations, OLS, responder metrics, temporal summaries, exports, and application startup. |
+
+Remaining caveats: the automated suite is targeted rather than a complete clinical
+validation; mediation, inactive pages, browser-level interaction, and deployment
+privacy/security controls remain unvalidated. The DOCX, ODT, and PPTX guides were
+not regenerated and should be treated as historical artifacts until the first tag.
 
 ## Executive summary
 

@@ -1,6 +1,8 @@
 """Shared data-loading and session-state helpers."""
 
 import re
+import hashlib
+import copy
 from collections import defaultdict
 from io import BytesIO
 
@@ -26,6 +28,7 @@ DEFAULT_SESSION_STATE = {
     "categorical_cols": [],
     "participants_col": None,
     "sheet_name": None,
+    "upload_digest": None,
     "temporal_cols": [],
     "temporal_families": {},
     "temporal_summary": None,
@@ -192,12 +195,34 @@ def init_session_state():
     """Initialize shared Streamlit state without replacing existing values."""
     for key, value in DEFAULT_SESSION_STATE.items():
         if key not in st.session_state:
-            st.session_state[key] = value
+            st.session_state[key] = copy.deepcopy(value)
 
 
 def read_csv_file(file_obj):
     """Read an uploaded CSV file."""
     return pd.read_csv(file_obj)
+
+
+def upload_content_digest(content):
+    """Return a stable identity for uploaded bytes."""
+    return hashlib.sha256(content).hexdigest()
+
+
+def upload_requires_reload(current_digest, new_digest, current_sheet=None, new_sheet=None):
+    """Return whether file content or the selected workbook sheet changed."""
+    return current_digest != new_digest or current_sheet != new_sheet
+
+
+def _clear_loaded_dataset():
+    """Remove a dataset and all state derived from it after a failed replacement."""
+    for key in list(st.session_state):
+        if key in DEFAULT_SESSION_STATE or key.endswith("_result") or key.endswith("_results"):
+            value = DEFAULT_SESSION_STATE.get(key)
+            st.session_state[key] = copy.deepcopy(value)
+    st.session_state["df"] = None
+    st.session_state["df_name"] = None
+    st.session_state["sheet_name"] = None
+    st.session_state["upload_digest"] = None
 
 
 def get_excel_sheet_names(file_obj):
@@ -266,6 +291,13 @@ def get_state():
 
 def _reset_variable_state(df):
     """Reset inferred variable selections for a newly loaded dataset."""
+    preserved = {"stats_file_uploader", "excel_sheet_selectbox"}
+    for key in list(st.session_state):
+        if key not in preserved and (
+            key.endswith(("_multiselect", "_selectbox", "_result", "_results"))
+            or key.startswith(("corr_", "group_comp_", "uniols_", "multiols_", "resp_", "temporal_"))
+        ):
+            del st.session_state[key]
     default_group = choose_default_group_col(df)
     cont_cols, cat_cols = infer_variable_types(df, group_col=default_group)
 
@@ -288,22 +320,30 @@ def load_dataframe_ui():
     if uploaded_file is not None:
         file_name = uploaded_file.name
         file_type = file_name.lower().split(".")[-1]
+        file_bytes = uploaded_file.getvalue()
+        content_digest = upload_content_digest(file_bytes)
 
         if file_type == "csv":
-            if st.session_state.get("df_name") != file_name:
+            needs_reload = upload_requires_reload(
+                st.session_state.get("upload_digest"), content_digest
+            )
+            if needs_reload:
                 try:
-                    df = read_csv_file(uploaded_file)
+                    df = read_csv_file(BytesIO(file_bytes))
                     st.session_state["df"] = df
                     st.session_state["df_name"] = file_name
                     st.session_state["sheet_name"] = None
+                    st.session_state["upload_digest"] = content_digest
                     _reset_variable_state(df)
                     st.sidebar.success("CSV loaded successfully.")
                 except Exception as e:
+                    _clear_loaded_dataset()
                     st.sidebar.error(f"Could not load CSV: {e}")
 
         elif file_type in ["xlsx", "xls"]:
             try:
-                sheet_names, file_bytes = get_excel_sheet_names(uploaded_file)
+                xls = pd.ExcelFile(BytesIO(file_bytes))
+                sheet_names = xls.sheet_names
                 selected_sheet = st.sidebar.selectbox(
                     "Excel sheet",
                     options=sheet_names,
@@ -315,9 +355,9 @@ def load_dataframe_ui():
                     key="excel_sheet_selectbox",
                 )
 
-                needs_reload = (
-                    st.session_state.get("df_name") != file_name
-                    or st.session_state.get("sheet_name") != selected_sheet
+                needs_reload = upload_requires_reload(
+                    st.session_state.get("upload_digest"), content_digest,
+                    st.session_state.get("sheet_name"), selected_sheet,
                 )
 
                 if needs_reload:
@@ -325,9 +365,11 @@ def load_dataframe_ui():
                     st.session_state["df"] = df
                     st.session_state["df_name"] = file_name
                     st.session_state["sheet_name"] = selected_sheet
+                    st.session_state["upload_digest"] = content_digest
                     _reset_variable_state(df)
                     st.sidebar.success("Excel sheet loaded successfully.")
             except Exception as e:
+                _clear_loaded_dataset()
                 st.sidebar.error(f"Could not load Excel file: {e}")
 
     return st.session_state.get("df")

@@ -1,0 +1,5 @@
+participant_id,group,outcome,predictor,pre,post,retest1,retest2,marker_T1,marker_T2
+P01,Control,2.0,1.0,10,11,10,10.2,5,6
+P02,Control,3.5,2.0,12,13,12,11.8,7,8
+P03,Treatment,5.0,3.0,11,14,11,11.1,6,9
+P04,Treatment,7.0,4.0,13,16,13,12.9,8,11

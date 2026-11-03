@@ -46,7 +46,7 @@ with st.expander("How Temporal Dynamics works", expanded=False):
             "trajectories."
         )
         st.markdown(
-            "Select SD, 95% CI, or SE error bars; optionally normalize each "
+            "Select a 95% participant-bootstrap median CI, IQR, or descriptive SD; optionally normalize each "
             "participant so their first available timepoint equals 100; then "
             "choose how many family graphs appear per row."
         )
@@ -70,12 +70,13 @@ with st.expander("How Temporal Dynamics works", expanded=False):
         st.markdown(
             "Baseline normalization defaults to Yes when a participant ID is "
             "available. It sets each participant's first value within each "
-            "family to 100% before calculating medians and confidence intervals."
+            "family to 100% before calculating medians and bootstrap confidence intervals."
         )
         st.markdown(
             "Grouping defaults to the overall median. Choose **Use another "
             "group** to reveal a group-column selector. Lines show medians and "
-            "shaded regions show 95% confidence intervals."
+            "shaded regions show 95% percentile bootstrap confidence intervals for medians. "
+            "These plots are descriptive and are not repeated-measures hypothesis tests."
         )
 
 temporal_dynamics_type = st.segmented_control(

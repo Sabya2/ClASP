@@ -10,6 +10,7 @@ from srcs.utils_features.common import (
     render_sidebar_variable_selector,
     set_paper_plot_style,
 )
+from srcs.version import __version__
 
 
 DEFAULT_PAGE_CONFIG = {
@@ -90,6 +91,7 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
+    st.caption(f"Version {__version__}")
     set_paper_plot_style()
     init_session_state()
 

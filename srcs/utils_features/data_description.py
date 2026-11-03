@@ -7,9 +7,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-from scipy.stats import f_oneway, kruskal, chi2_contingency
+from scipy.stats import chi2_contingency
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment
+from srcs.utils_visualisation.common import run_group_test
 
 
 def get_basic_info(df: pd.DataFrame) -> pd.DataFrame:
@@ -166,19 +167,11 @@ def build_continuous_summary_table(
                 else:
                     group_value_map[str(group)] = np.array([])
 
-            # Statistical test across groups
-            if len(valid_arrays) >= 2:
-                try:
-                    if summary_format == "mean_sd":
-                        _, pval = f_oneway(*valid_arrays)
-                    else:
-                        _, pval = kruskal(*valid_arrays)
-                except Exception:
-                    pval = np.nan
-            else:
-                pval = np.nan
+            test_result = run_group_test(df, group_col, col, method="auto") if len(valid_arrays) >= 2 else None
+            pval = test_result["overall_p"] if test_result else np.nan
 
             row["p_value"] = format_p_value(pval)
+            row["test"] = test_result["overall_test"] if test_result else "NA"
 
             # Cohen's d only for exactly 2 groups
             if len(groups) == 2:
@@ -190,7 +183,7 @@ def build_continuous_summary_table(
 
     # Decide final column order
     if split_by_group and group_col:
-        column_order = ["variable", "Full cohort"] + [str(g) for g in groups] + ["p_value"]
+        column_order = ["variable", "Full cohort"] + [str(g) for g in groups] + ["test", "p_value"]
         if len(groups) == 2:
             column_order += ["cohens_d"]
     else:

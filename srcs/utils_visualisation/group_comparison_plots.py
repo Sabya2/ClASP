@@ -172,6 +172,7 @@ def draw_group_comparison_on_ax(
     strip=True,
     two_groups_only=False,
     force_parametric=False,
+    method="auto",
     show_annotations=True,
     scaling="none",
 ):
@@ -198,6 +199,7 @@ def draw_group_comparison_on_ax(
         y_col=y_plot_col,
         two_groups_only=two_groups_only,
         force_parametric=force_parametric,
+        method=method,
     )
     if result is None:
         ax.axis("off")
@@ -281,8 +283,14 @@ def format_group_summary(result, group_col, y_col):
     overall_p = result.get("overall_p", np.nan)
     use_dunn = result.get("use_dunn_test", False)
     scaling_note = result.get("scaling_note", "raw")
+    sample_sizes = ", ".join(f"{group}: n={len(values)}" for group, values in result["groups_data"].items())
 
-    txt = f"**{group_col} – {y_col}** (total N = {total_n}, scale = {scaling_note})\n"
+    txt = (
+        f"**{group_col} – {y_col}** (independent groups; total N = {total_n}, "
+        f"scale = {scaling_note})\n\nAnalysed sample sizes: {sample_sizes}.\n"
+    )
+    if result.get("data_warning"):
+        txt += f"\n{result['data_warning']}\n"
 
     if pd.isna(overall_p):
         txt += f"Overall test {overall_test} failed (no valid p-value).\n"
@@ -389,7 +397,8 @@ def render_group_comparison_page(df, continuous_cols, group_col):
 
             **How the statistics work**
             - For each selected variable, the app prepares valid numeric data and removes missing or infinite values.
-            - It then runs an overall group comparison test using your existing `run_group_test(...)` workflow.
+            - Tests compare independent groups. Automatic selection uses Shapiro–Wilk, then Levene's test to choose Student versus Welch methods; otherwise it uses Mann–Whitney or Kruskal–Wallis/Dunn.
+            - You can explicitly request parametric or non-parametric methods. Automatic assumption checks are a convenience and can be fragile for very small or very large samples.
             - If pairwise comparisons are available, significant group differences are drawn above the plot as brackets with significance stars.
             - The plot title shows the omnibus test and p-value for the current variable and transformation.
 
@@ -443,6 +452,16 @@ def render_group_comparison_page(df, continuous_cols, group_col):
             value=2,
             key="group_comp_grid_cols",
         )
+        method_label = st.selectbox(
+            "Statistical method",
+            ["Automatic", "Parametric", "Non-parametric"],
+            help="Summary display format does not control this choice.",
+            key="group_comp_method",
+        )
+        method = {
+            "Automatic": "auto", "Parametric": "parametric",
+            "Non-parametric": "nonparametric",
+        }[method_label]
 
 
 
@@ -517,6 +536,7 @@ def render_group_comparison_page(df, continuous_cols, group_col):
                     showfliers=True,
                     show_annotations=True,
                     scaling=scaling,
+                    method=method,
                 )
 
                 summaries[col] = format_group_summary(result, plot_group_col, col)

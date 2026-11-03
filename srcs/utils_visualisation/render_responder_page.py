@@ -67,11 +67,8 @@ def render_responder_page(
         $$\\mathrm{SEM} = \\mathrm{SD}_{\\text{baseline}} \\times \\sqrt{1 - \\mathrm{ICC}}$$
         where:
         - **SD_baseline** is the standard deviation of the baseline measurement (or pooled SD across test-retest measurements)
-        - **ICC** is the test-retest reliability estimate, such as ICC(2,1) or ICC(3,1)
-        If an ICC is not available and two repeated measurements (t1 and t2) are available, SEM can be estimated from the difference scores:
-        $$\\mathrm{SEM} = \\frac{\\mathrm{SD}_{\\text{diff}}}{\\sqrt{2}}$$
-        where:
-        $$\\mathrm{SD}_{\\text{diff}} = \\mathrm{SD}(t2 - t1)$$
+        - **ICC** is computed as ICC(A,1): two-way absolute agreement, single measurement.
+        It penalizes systematic session bias and is calculated separately within each analysis group.
 
         **2. TE (Typical Error) from test-retest measurements**
         TE can be estimated as the standard deviation of the test-retest change scores:
@@ -80,18 +77,15 @@ def render_responder_page(
         $$\\mathrm{CI}_{\\text{change}} = \\mathrm{change} \\pm z \\times \\mathrm{TE}_{\\text{change}}$$
 
         **3. SEM-based CI for individual change**
-        When SEM is selected, the CI is calculated as:
-        $$\\mathrm{CI}_{\\text{change, SEM}} = \\mathrm{change} \\pm z \\times \\mathrm{SEM}$$
-        SEM may therefore be estimated using either:
-        $$\\mathrm{SEM} = \\mathrm{SD}_{\\text{baseline}}\\sqrt{1-\\mathrm{ICC}}$$
-        or:
-        $$\\mathrm{SEM} = \\frac{\\mathrm{SD}_{\\text{diff}}}{\\sqrt{2}}$$
+        A change contains error from two observations. When SEM is selected:
+        $$\\mathrm{SEM}_{\\text{change}} = \\sqrt{2}\\,\\mathrm{SEM}_{\\text{single}}$$
+        $$\\mathrm{CI}_{\\text{change, SEM}} = \\mathrm{change} \\pm z \\times \\mathrm{SEM}_{\\text{change}}$$
 
         **Interpretation of the error metrics**
         - **TE**: Represents the observed variability in test-retest change scores.
-        - **SEM**: Represents the estimated measurement uncertainty of an individual measurement.
+        - **SEM (single)**: Represents estimated uncertainty of one observation; change SEM is √2 times this value.
         - **TE-based CI** is therefore directly based on the observed test-retest variability.
-        - **SEM-based CI** uses the standard error of measurement and generally produces a narrower interval when SEM = SD_diff / √2.
+        - **SEM-based CI** uses uncertainty for a difference of two observations.
 
         **Stability tests (t1 vs t2 reliability check)**
         - **Paired t-test**: Tests whether there is a systematic mean difference between t1 and t2 (should be non-significant, p > 0.05)

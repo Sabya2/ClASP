@@ -42,7 +42,7 @@ HELP_TOPICS = {
 GUIDE_CONTENT = {
     "Input data": {
         "Overview": [
-            "ClASPx accepts CSV (`.csv`) and Excel (`.xlsx`, `.xls`) files.",
+            "CLASP accepts CSV (`.csv`) and Excel (`.xlsx`, `.xls`) files.",
             "First row must contain column names; each subsequent row represents one participant or observation.",
             "Include clear, unique column names; avoid duplicate names.",
             "Typical columns: optional participant ID, optional grouping variable, numeric measurement columns, and optional pre/post/reliability columns for responder analysis.",
@@ -71,7 +71,7 @@ GUIDE_CONTENT = {
     },
     "Data quality": {
         "Import checks": [
-            "ClASPx attempts to convert selected columns to numeric, interpret decimal separators correctly, and validate participant IDs where required.",
+            "CLASP attempts to convert selected columns to numeric, interpret decimal separators correctly, and validate participant IDs where required.",
             "Check **Data summary** for incorrectly named columns. Column-name validation identifies spaces, leading or trailing whitespace, and other unsupported characters.",
         ],
         "Consistency": [
@@ -112,7 +112,7 @@ GUIDE_CONTENT = {
             "Prefer pseudonymous participant identifiers and de-identified datasets for demonstrations."
         ],
         "Privacy notice": [
-            "Review the ClASPx privacy notice for details on login data, uploaded files, usage tracking, and retention."
+            "Confirm local deployment and institutional data-governance requirements before uploading data."
         ],
     },
 }
@@ -149,7 +149,7 @@ with quick_start_col:
 
 with help_col:
     st.markdown("### Help")
-    st.caption("Select a keyword to open the relevant ClASPx page.")
+    st.caption("Select a keyword to open the relevant CLASP page.")
     selected_topic = st.pills(
         "Help topics",
         options=list(HELP_TOPICS),
@@ -218,7 +218,7 @@ if selected_section:
 
 
 st.markdown("### Reproducibility and citation")
-st.markdown("Record ClASPx version, analysis date, input-data preparation steps, selected variables, statistical method and options, grouping variable (if used), and downloaded output files.")
+st.markdown("Record CLASP version, analysis date, input-data preparation steps, selected variables, statistical method and options, grouping variable (if used), and downloaded output files.")
 
 st.markdown("#### DOI")
 st.markdown("DOI: _[to be added upon release]_")
@@ -239,4 +239,4 @@ st.warning(
     "Do not include confidential or identifiable participant data in the "
     "message or attachments."
 )
-st.markdown("When reporting an issue, include ClASPx version, analysis page, file type and size, selected options, exact error message, and a small synthetic example if possible.")
+st.markdown("When reporting an issue, include CLASP version, analysis page, file type and size, selected options, exact error message, and a small synthetic example if possible.")

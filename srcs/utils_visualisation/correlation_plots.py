@@ -4,12 +4,14 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
+import re
 
 from srcs.utils_visualisation.common import build_correlation_matrices
 
 
-def _render_plotly_download(fig: go.Figure, filename_stem: str = "correlation_heatmap"):
+def _render_plotly_download(fig: go.Figure, filename_stem: str = "correlation_heatmap", key_prefix=None):
     """Render PNG and HTML download controls for a Plotly figure."""
+    key_prefix = key_prefix or filename_stem
     with st.expander("⬇️ Download this chart", expanded=False):
         dl_col1, dl_col2 = st.columns(2)
 
@@ -22,6 +24,7 @@ def _render_plotly_download(fig: go.Figure, filename_stem: str = "correlation_he
                     file_name=f"{filename_stem}.png",
                     mime="image/png",
                     width="stretch",
+                    key=f"{key_prefix}_png",
                 )
             except Exception as e:
                 st.warning(f"PNG export requires `kaleido`: `pip install kaleido`\n\n{e}")
@@ -34,6 +37,7 @@ def _render_plotly_download(fig: go.Figure, filename_stem: str = "correlation_he
                 file_name=f"{filename_stem}.html",
                 mime="text/html",
                 width="stretch",
+                key=f"{key_prefix}_html",
             )
 
 
@@ -105,8 +109,8 @@ def plot_correlation_heatmap_with_significance_plotly(
             texttemplate="%{text}" if show_text else None,
             textfont={"size": 7},
             colorscale="RdBu_r",
-            zmin=-st.session_state.get('min_corr_to_plot'), #-1,
-            zmax=st.session_state.get('min_corr_to_plot'), #0.5,
+            zmin=-1,
+            zmax=1,
             colorbar=dict(
                 title=label_map.get(method, "Correlation"),
                 len=0.5, outlinewidth=0,
@@ -122,7 +126,7 @@ def plot_correlation_heatmap_with_significance_plotly(
     )
 
     fig.update_layout(
-        title=dict(text=f"{title}-(|r| ≥ {st.session_state.get('min_corr_to_plot'):.2f})",
+        title=dict(text=f"{title} (displaying |r| ≥ {min_abs_corr:.2f}; diagonal {'kept' if keep_diagonal else 'hidden'})",
                    x=0.25,
                    font=dict(color=LABEL_COLOR),),
         width=width,
@@ -185,8 +189,6 @@ def render_correlation_page(df, continuous_cols, group_col=None, participants_co
         - The matrix remains square, and cells below the selected absolute-correlation threshold are hidden visually.
         - The diagonal can be retained so each variable still appears correlated with itself.
 
-        Pandas supports `pearson`, `spearman`, and `kendall` correlation methods, and computes pairwise correlations while excluding missing values. [web:48]
-
         **How to read the plot**
         - Cell color shows the direction and strength of association:
           - negative values on one side of the scale
@@ -196,15 +198,14 @@ def render_correlation_page(df, continuous_cols, group_col=None, participants_co
         - If text annotations are shown, they summarize the cell value and significance markers directly inside the heatmap.
         - When many variables are selected, text annotations may be hidden automatically to preserve readability.
 
-        Plotly heatmaps support custom hover text and hover templates, which is why the full pairwise details can be shown interactively even when in-cell text is reduced. [web:46][web:56][web:60]
-
         **Grouped analysis**
         - If **Plot separately by group** is enabled, the app computes a separate correlation matrix for each selected subgroup.
         - This helps compare whether variable relationships are stable or different across strata.
 
         **Practical notes**
         - Very high variable counts can make annotated heatmaps harder to read.
-        - The minimum absolute-correlation slider affects both which cells are shown and the displayed color scale limits in your current implementation.
+        - The minimum absolute-correlation slider filters only the display. It does not change coefficients or p-values and does not adjust for multiple testing.
+        - The colour scale is fixed from -1 to 1; the diagonal is retained explicitly.
         - If a selected group has too few valid rows, its heatmap is skipped.
                     """
                 )
@@ -247,16 +248,14 @@ def render_correlation_page(df, continuous_cols, group_col=None, participants_co
 
     with col3:
         min_corr_to_plot = st.slider(
-            "Minimum |correlation| and scale",
+            "Minimum |correlation| to display",
             min_value=0.0,
             max_value=1.0,
-            value=1.0,
+            value=0.0,
             step=0.05,
             key="corr_min_abs_value",
-            help="Only show cells, and scale with absolute correlation at or above this threshold."
+            help="Hides weaker cells. The colour scale remains fixed from -1 to 1."
         )
-        st.session_state['min_corr_to_plot'] = min_corr_to_plot
-
     if len(corr_cols) < 2:
         st.info("Select at least two variables.")
         return
@@ -321,6 +320,7 @@ def render_correlation_page(df, continuous_cols, group_col=None, participants_co
             corr_df,
             title=f"Correlation heatmap ({method})",
             method=method,
+            min_abs_corr=min_corr_to_plot,
             width=base_size,
             height=base_size,
             show_text=show_text,
@@ -328,7 +328,7 @@ def render_correlation_page(df, continuous_cols, group_col=None, participants_co
         )
 
         st.plotly_chart(fig, width="content")
-        _render_plotly_download(fig, filename_stem=f"corr_heatmap_{method}")
+        _render_plotly_download(fig, filename_stem=f"corr_heatmap_{method}", key_prefix=f"corr_all_{method}")
         return
 
     # --------------------------
@@ -353,13 +353,16 @@ def render_correlation_page(df, continuous_cols, group_col=None, participants_co
                 sub_corr_df,
                 title=f"Correlation heatmap: {grp} ({method})",
                 method=method,
+                min_abs_corr=min_corr_to_plot,
                 width=base_size,
                 height=base_size,
                 show_text=show_text,
                 keep_diagonal=True,
             )
             st.plotly_chart(fig, width="content")
-            _render_plotly_download(fig, filename_stem=f"corr_heatmap_{method}")
+            safe_group = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(grp)).strip("_") or "group"
+            stem = f"corr_heatmap_{method}_{safe_group}"
+            _render_plotly_download(fig, filename_stem=stem, key_prefix=stem)
 
         except Exception as e:
             st.warning(f"Could not compute correlation for group '{grp}': {e}")

@@ -129,10 +129,8 @@ def _grid_shape(n, ncols=2):
 def get_figure_download(fig):
     """Serialize a Matplotlib figure as a PNG buffer."""
     buf = io.BytesIO()
-    # fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
-    plt.savefig(buf, format="png", dpi=300, bbox_inches="tight")
-    # img.save(buf, format="png")
-    # buf.seek(0)
+    fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
+    buf.seek(0)
     return buf
 
 
@@ -262,13 +260,20 @@ def run_group_test(
     two_groups_only=False,
     force_parametric=False,
     correction_method='bonferroni',  # "holm", "sidak", etc.
+    method="auto",
 ):
+    """Compare independent groups under one explicit, shared selection policy.
+
+    ``auto`` uses Shapiro-Wilk within every group: parametric tests are selected
+    only when all groups have at least three observations and p >= alpha.
+    Levene's test then selects equal-variance or Welch methods. ``parametric``
+    and ``nonparametric`` are explicit overrides. ``force_parametric`` remains
+    as a backwards-compatible alias for ``method='parametric'``.
     """
-    Run group comparison for 2 or more groups.
-    - If two_groups_only=True, always use t‑test / Mann–Whitney.
-    - If normal & equal_variance, use ANOVA / t‑test; otherwise use Kruskal / Mann–Whitney.
-    - For 3+ groups with non-parametric data: uses Dunn's test with correction (not Mann-Whitney pairwise).
-    """
+    if force_parametric:
+        method = "parametric"
+    if method not in {"auto", "parametric", "nonparametric"}:
+        raise ValueError("method must be 'auto', 'parametric', or 'nonparametric'.")
     df_plot = df[[group_col, y_col]].replace([np.inf, -np.inf], np.nan).dropna()
     groups_order = (
         df_plot[group_col].dropna().value_counts(sort=False).index
@@ -277,210 +282,108 @@ def run_group_test(
         return None
 
 
-    # collect group‑wise values
-    groups = {}
-    for g in groups_order:
-        vals = df_plot[df_plot[group_col] == g][y_col].astype(float).dropna().values
-        groups[g] = vals
-
-
-    # --- normality & variance --- (ignored if two_groups_only)
-    all_normal = True
-    normality = {}
-    use_kruskal = False  # track if we used Kruskal-Wallis
-    if not two_groups_only and not force_parametric:
-        for g, vals in groups.items():
-            if len(vals) >= 3:
-                try:
-                    _, p_norm = shapiro(vals)
-                except Exception:
-                    p_norm = np.nan
-            else:
-                p_norm = np.nan
-            normality[g] = p_norm
-            if np.isnan(p_norm) or p_norm < alpha:
-                all_normal = False
-
-
-        if len(groups_order) > 2:
-            try:
-                _, p_levene = levene(*[groups[g] for g in groups_order])
-            except Exception:
-                p_levene = np.nan
-        else:
+    groups = {g: df_plot.loc[df_plot[group_col] == g, y_col].astype(float).to_numpy() for g in groups_order}
+    normality = {
+        g: (float(shapiro(v).pvalue) if 3 <= len(v) <= 5000 and np.ptp(v) > 0 else np.nan)
+        for g, v in groups.items()
+    }
+    all_normal = all(np.isfinite(p) and p >= alpha for p in normality.values())
+    selected_method = method if method != "auto" else ("parametric" if all_normal else "nonparametric")
+    all_values = np.concatenate(list(groups.values()))
+    if np.ptp(all_values) == 0:
+        return {
+            "groups": list(groups_order), "normality_p": normality,
+            "all_normal": False, "levene_p": np.nan,
+            "overall_test": "n/a (all values constant)", "overall_p": np.nan,
+            "overall_p_label": "n/a", "overall_stars": "n/a", "pairwise": [],
+            "correction_method": None, "groups_data": groups,
+            "use_dunn_test": False, "selected_method": selected_method,
+            "selection_policy": method, "design": "independent groups",
+            "data_warning": "All analysed values are identical; no group test is defined.",
+        }
+    if selected_method == "parametric":
+        try:
+            p_levene = float(levene(*groups.values()).pvalue)
+        except ValueError:
             p_levene = np.nan
     else:
-        all_normal = True
         p_levene = np.nan
+    equal_variance = bool(np.isfinite(p_levene) and p_levene >= alpha)
 
-
-    # --- overall test: ANOVA vs Kruskal or t‑test vs Mann–Whitney ---
-    if two_groups_only or len(groups_order) == 2:
-        g1, g2 = groups_order[0], groups_order[1]
-        x, y = groups[g1], groups[g2]
-
-
-        if len(x) < 2 or len(y) < 2:
-            overall_test = "n/a"
+    arrays = list(groups.values())
+    if any(len(v) < 2 for v in arrays):
+        overall_test, overall_p = "n/a", np.nan
+    elif len(arrays) == 2:
+        if selected_method == "parametric":
+            overall_test = "Student's independent t-test" if equal_variance else "Welch's independent t-test"
+            overall_p = float(ttest_ind(*arrays, equal_var=equal_variance).pvalue)
+        else:
+            overall_test = "Mann–Whitney U"
+            overall_p = float(mannwhitneyu(*arrays, alternative="two-sided").pvalue)
+    elif selected_method == "parametric":
+        overall_test = "One-way ANOVA" if equal_variance else "Welch's ANOVA"
+        overall_p = float(f_oneway(*arrays, equal_var=equal_variance).pvalue)
+    else:
+        overall_test = "Kruskal–Wallis"
+        try:
+            overall_p = float(kruskal(*arrays).pvalue)
+        except ValueError:
             overall_p = np.nan
-        else:
-            if all_normal and not force_parametric:
-                equal_var = bool(p_levene >= alpha) if not np.isnan(p_levene) else False
-                _, overall_p = ttest_ind(x, y, equal_var=equal_var, nan_policy="omit")
-                overall_test = "t-test"
-            else:
-                _, overall_p = mannwhitneyu(x, y, alternative="two-sided")
-                overall_test = "Mann–Whitney"
 
-
-    else:  # 3+ groups
-        if all_normal and not force_parametric:
-            try:
-                _, overall_p = f_oneway(*[groups[g] for g in groups_order])
-                overall_test = "ANOVA"
-                use_kruskal = False
-            except Exception:
-                overall_test = "ANOVA"
-                overall_p = np.nan
-                use_kruskal = False
-        else:
-            try:
-                _, overall_p = kruskal(*[groups[g] for g in groups_order])
-                overall_test = "Kruskal–Wallis"
-                use_kruskal = True  # <-- flag to use Dunn's test
-            except Exception:
-                overall_test = "Kruskal–Wallis"
-                overall_p = np.nan
-                use_kruskal = True
-
-
-    # --- pairwise tests & effect sizes ---
+    pairs = list(itertools.combinations(groups_order, 2))
     pairwise_results = []
-    if len(groups_order) >= 2:
-
-        # For 3+ groups with Kruskal-Wallis: use Dunn's test
-        if len(groups_order) > 2 and use_kruskal and not force_parametric:
-            # Prepare data for scikit-posthocs
-            df_for_dunn = df_plot.copy()
-
-            try:
-                # Dunn's test with p-value adjustment
-                dunn_result = sp.posthoc_dunn(
-                    df_for_dunn,
-                    val_col=y_col,
-                    group_col=group_col,
-                    p_adjust=correction_method
-                )
-
-                # Extract pairwise results from Dunn's test matrix
-                for i, g1 in enumerate(groups_order):
-                    for j, g2 in groups_order[i+1:],:
-                        if g1 != g2:
-                            p_raw = dunn_result.loc[g1, g2]
-                            p_corrected = p_raw  # Dunn already has correction applied
-
-                            # Calculate Cohen's d for effect size
-                            x = groups[g1]
-                            y = groups[g2]
-                            d = cohens_d(x, y)
-
-                            pairwise_results.append({
-                                "group1": g1,
-                                "group2": g2,
-                                "test": "Dunn's Test",
-                                "p": p_raw,
-                                "p_corrected": p_corrected,
-                                "p_label": p_to_label(p_corrected),
-                                "stars": p_to_star(p_corrected),
-                                "stars_corrected": p_to_star(p_corrected),
-                                "p_corrected_label": p_to_label(p_corrected),
-                                "cohens_d": d,
-                            })
-
-            except Exception as e:
-                # Fallback to Mann-Whitney if Dunn fails
-                pairs = list(itertools.combinations(groups_order, 2))
-                for g1, g2 in pairs:
-                    x = groups[g1]
-                    y = groups[g2]
-                    if len(x) < 2 or len(y) < 2:
-                        p_pair = np.nan
-                        pair_test = "n/a"
-                    else:
-                        _, p_pair = mannwhitneyu(x, y, alternative="two-sided")
-                        pair_test = "Mann–Whitney"
-                    d = cohens_d(x, y)
-                    pairwise_results.append({
-                        "group1": g1,
-                        "group2": g2,
-                        "test": pair_test,
-                        "p": p_pair,
-                        "p_label": p_to_label(p_pair),
-                        "stars": p_to_star(p_pair),
-                        "cohens_d": d,
-                    })
-
-                # Apply correction to fallback Mann-Whitney
-                if correction_method and len(pairwise_results) > 1:
-                    p_values = [res["p"] for res in pairwise_results]
-                    try:
-                        corrected = multipletests(p_values, alpha=alpha, method=correction_method)
-                        corrected_p = corrected[1]
-                        for i, res in enumerate(pairwise_results):
-                            res["p_corrected"] = corrected_p[i]
-                            res["p_corrected_label"] = p_to_label(corrected_p[i])
-                            res["stars_corrected"] = p_to_star(corrected_p[i])
-                    except Exception:
-                        pass
-
-        # For 2 groups OR parametric: use standard pairwise tests
-        else:
-            pairs = list(itertools.combinations(groups_order, 2))
-            for g1, g2 in pairs:
-                x = groups[g1]
-                y = groups[g2]
-                if len(x) < 2 or len(y) < 2:
-                    p_pair = np.nan
-                    pair_test = "n/a"
-                else:
-                    if all_normal and not force_parametric and not two_groups_only:
-                        equal_var = bool(p_levene >= alpha) if not np.isnan(p_levene) else False
-                        _, p_pair = ttest_ind(x, y, equal_var=equal_var, nan_policy="omit")
-                        pair_test = "t‑test"
-                    else:
-                        _, p_pair = mannwhitneyu(x, y, alternative="two-sided")
-                        pair_test = "Mann–Whitney"
-                d = cohens_d(x, y)
-                pairwise_results.append({
-                    "group1": g1,
-                    "group2": g2,
-                    "test": pair_test,
-                    "p": p_pair,
-                    "p_label": p_to_label(p_pair),
-                    "stars": p_to_star(p_pair),
-                    "cohens_d": d,
-                })
-
-
-            # --- multiple testing correction --- (only for non-Dunn cases)
-            if correction_method and len(pairwise_results) > 1 and not use_kruskal:
-                p_values = [res["p"] for res in pairwise_results]
-                try:
-                    corrected = multipletests(p_values, alpha=alpha, method=correction_method)
-                    corrected_p = corrected[1]
-                    for i, res in enumerate(pairwise_results):
-                        res["p_corrected"] = corrected_p[i]
-                        res["p_corrected_label"] = p_to_label(corrected_p[i])
-                        res["stars_corrected"] = p_to_star(corrected_p[i])
-                except Exception:
-                    pass
-
+    use_dunn = len(groups_order) > 2 and selected_method == "nonparametric"
+    if use_dunn:
+        try:
+            raw_matrix = sp.posthoc_dunn(df_plot, val_col=y_col, group_col=group_col, p_adjust=None)
+            adjusted_matrix = sp.posthoc_dunn(
+                df_plot, val_col=y_col, group_col=group_col, p_adjust=correction_method
+            ) if correction_method else raw_matrix
+        except Exception as exc:
+            raise RuntimeError("Dunn post-hoc calculation failed; no fallback method was substituted.") from exc
+        for g1, g2 in pairs:
+            p_raw = float(raw_matrix.loc[g1, g2])
+            p_adjusted = float(adjusted_matrix.loc[g1, g2])
+            pairwise_results.append({
+                "group1": g1, "group2": g2, "test": "Dunn's test",
+                "p": p_raw, "p_corrected": p_adjusted,
+                "p_label": p_to_label(p_raw), "stars": p_to_star(p_raw),
+                "p_corrected_label": p_to_label(p_adjusted),
+                "stars_corrected": p_to_star(p_adjusted),
+                "cohens_d": cohens_d(groups[g1], groups[g2]),
+            })
+    else:
+        for g1, g2 in pairs:
+            x, y = groups[g1], groups[g2]
+            if len(x) < 2 or len(y) < 2:
+                p_pair, pair_test = np.nan, "n/a"
+            elif selected_method == "parametric":
+                pair_equal = bool(np.isfinite(levene(x, y).pvalue) and levene(x, y).pvalue >= alpha)
+                p_pair = float(ttest_ind(x, y, equal_var=pair_equal).pvalue)
+                pair_test = "Student's independent t-test" if pair_equal else "Welch's independent t-test"
+            else:
+                p_pair = float(mannwhitneyu(x, y, alternative="two-sided").pvalue)
+                pair_test = "Mann–Whitney U"
+            pairwise_results.append({
+                "group1": g1, "group2": g2, "test": pair_test, "p": p_pair,
+                "p_label": p_to_label(p_pair), "stars": p_to_star(p_pair),
+                "cohens_d": cohens_d(x, y),
+            })
+        finite_indices = [i for i, row in enumerate(pairwise_results) if np.isfinite(row["p"])]
+        if correction_method and len(finite_indices) > 1:
+            adjusted = multipletests(
+                [pairwise_results[i]["p"] for i in finite_indices], method=correction_method
+            )[1]
+            for index, p_adjusted in zip(finite_indices, adjusted):
+                pairwise_results[index]["p_corrected"] = float(p_adjusted)
+                pairwise_results[index]["p_corrected_label"] = p_to_label(p_adjusted)
+                pairwise_results[index]["stars_corrected"] = p_to_star(p_adjusted)
 
     return {
         "groups": list(groups_order),
-        "normality_p": normality if not two_groups_only and not force_parametric else None,
+        "normality_p": normality,
         "all_normal": all_normal,
-        "levene_p": p_levene if not two_groups_only and not force_parametric else None,
+        "levene_p": p_levene,
         "overall_test": overall_test,
         "overall_p": overall_p,
         "overall_p_label": p_to_label(overall_p),
@@ -488,5 +391,8 @@ def run_group_test(
         "pairwise": pairwise_results,
         "correction_method": correction_method if correction_method and len(pairwise_results) > 1 else None,
         "groups_data": groups,
-        "use_dunn_test": len(groups_order) > 2 and use_kruskal and not force_parametric,  # <-- new flag
+        "use_dunn_test": use_dunn,
+        "selected_method": selected_method,
+        "selection_policy": method,
+        "design": "independent groups",
     }

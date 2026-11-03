@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use CLASP, cite the archived release used for your analysis."
+title: "CLASP: CLinical and Statistical Analysis Software Platform"
+type: software
+version: 0.1.0-dev
+authors:
+  - given-names: Sabyasachi
+    family-names: Chakrabarty
+repository-code: "https://github.com/Sabya2/ClASP"
+abstract: >-
+  A Streamlit application for exploratory clinical and statistical analysis,
+  designed for doctors and researchers with limited statistical training.
+keywords:
+  - clinical statistics
+  - Streamlit
+  - reproducible research

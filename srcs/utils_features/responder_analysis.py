@@ -20,26 +20,29 @@ import streamlit as st
 
 
 
-def icc_31_from_two_timepoints(df, t1_col, t2_col,
+def icc_a1_from_two_timepoints(df, t1_col, t2_col,
 ):
     """
-    Compute ICC(3,1) for test–retest reliability from two timepoints (t1, t2)
-    using a two-way mixed-effects, absolute-agreement, single-measurement model.
+    Compute ICC(A,1), two-way absolute agreement, single measurement.
 
-    Formula (k = 2 measurements per subject):
-        ICC(3,1) = (MS_subjects - MS_error) / (MS_subjects + MS_error)
+    This is the McGraw-Wong/Shrout-Fleiss absolute-agreement form. It includes
+    systematic session differences; ICC(C,1) consistency would not.
 
     Returns:
         icc_value: float
         details: dict with variance components and mean squares
     """
-    data = df[[t1_col, t2_col]].dropna(subset=[t1_col, t2_col]).copy()
+    data = df[[t1_col, t2_col]].apply(pd.to_numeric, errors="coerce").dropna()
 
     n = len(data)          # number of subjects
     k = 2                  # number of measurements (t1, t2)
 
-    y1 = data[t1_col].to_numpy()
-    y2 = data[t2_col].to_numpy()
+    if n < 2:
+        raise ValueError("ICC(A,1) requires at least two complete retest pairs.")
+    values = data[[t1_col, t2_col]].to_numpy(dtype=float)
+    if not np.isfinite(values).all():
+        raise ValueError("ICC inputs must be finite numeric values.")
+    y1, y2 = values[:, 0], values[:, 1]
 
     # Subject means and grand mean
     subject_means = (y1 + y2) / 2.0
@@ -53,38 +56,49 @@ def icc_31_from_two_timepoints(df, t1_col, t2_col,
     # Total sum of squares
     SS_total = np.sum((y1 - grand_mean) ** 2) + np.sum((y2 - grand_mean) ** 2)
 
-    # Sum of squares for error (within-subject)
-    SS_error = np.sum((y1 - subject_means) ** 2) + np.sum((y2 - subject_means) ** 2)
+    session_means = values.mean(axis=0)
+    SS_sessions = n * np.sum((session_means - values.mean()) ** 2)
+    SS_error = SS_total - SS_subjects - SS_sessions
 
     # Degrees of freedom
     df_subjects = n - 1
-    df_error = (n - 1) * (k - 1)  # for k=2, this is n-1
+    df_sessions = k - 1
+    df_error = (n - 1) * (k - 1)
 
     # Mean squares
     MS_subjects = SS_subjects / df_subjects
-    MS_error = SS_error / df_error if df_error > 0 else 0.0
+    MS_sessions = SS_sessions / df_sessions
+    MS_error = SS_error / df_error
 
-    # ICC(3,1)
-    if MS_subjects + MS_error == 0:
-        icc_value = 0.0
-    else:
-        icc_value = (MS_subjects - MS_error) / (MS_subjects + MS_error)
+    denominator = MS_subjects + (k - 1) * MS_error + k * (MS_sessions - MS_error) / n
+    if not np.isfinite(denominator) or denominator <= 0:
+        raise ValueError("ICC(A,1) is undefined for constant or degenerate paired data.")
+    icc_value = (MS_subjects - MS_error) / denominator
 
     details = {
         "n_subjects": n,
         "k_measurements": k,
         "SS_subjects": SS_subjects,
         "SS_error": SS_error,
+        "SS_sessions": SS_sessions,
         "SS_total": SS_total,
         "df_subjects": df_subjects,
         "df_error": df_error,
+        "df_sessions": df_sessions,
         "MS_subjects": MS_subjects,
         "MS_error": MS_error,
+        "MS_sessions": MS_sessions,
         "var_subject": MS_subjects,
         "var_error": MS_error,
+        "model": "ICC(A,1): two-way absolute agreement, single measurement",
     }
 
     return icc_value, details
+
+
+def icc_31_from_two_timepoints(df, t1_col, t2_col):
+    """Deprecated compatibility alias for :func:`icc_a1_from_two_timepoints`."""
+    return icc_a1_from_two_timepoints(df, t1_col, t2_col)
 
 
 
@@ -175,8 +189,8 @@ def check_t1_t2_stability(df, t1_col, t2_col,):
 
 
             st.markdown("**ICC**")
-            icc_value, icc_details = icc_31_from_two_timepoints(df, t1_col, t2_col)
-            st.metric("ICC value", f"{icc_value:.4f}")
+            icc_value, icc_details = icc_a1_from_two_timepoints(df, t1_col, t2_col)
+            st.metric("ICC(A,1) absolute agreement", f"{icc_value:.4f}")
 
             # Interpretation (Koo & Li, 2016)
             if icc_value < 0.50:
@@ -583,6 +597,8 @@ def calculate_swc_te(
         if intervention_df.empty:
             print(f"Skipping '{group_name}': no valid pre/post data.")
             continue
+        if len(intervention_df) < 2:
+            raise ValueError(f"Group '{group_name}' requires at least two complete pre/post observations.")
 
         if intervention_df[id_col].duplicated().any():
             raise ValueError(f"Duplicate participant IDs found in '{group_name}'.")
@@ -590,6 +606,8 @@ def calculate_swc_te(
         # Individual change
         pre_sd = intervention_df[pre_col].std()
         pre_mean = intervention_df[pre_col].mean()
+        if use_relative and (pre_mean == 0 or (intervention_df[pre_col] == 0).any()):
+            raise ValueError(f"Relative change is undefined for zero baseline values in '{group_name}'.")
         intervention_df["change"] = intervention_df[post_col] - intervention_df[pre_col]
         if use_relative:
             intervention_df["change"] = (intervention_df["change"]) / intervention_df[pre_col]
@@ -615,8 +633,12 @@ def calculate_swc_te(
         if retest_df.empty:
             print(f"Skipping '{group_name}': no valid t1/t2 data.")
             continue
+        if len(retest_df) < 2:
+            raise ValueError(f"Group '{group_name}' requires at least two complete retest pairs.")
 
         if use_relative:
+            if (retest_df[t1_col] == 0).any():
+                raise ValueError(f"Relative retest error is undefined for zero t1 values in '{group_name}'.")
             retest_df["retest_difference"] = (retest_df[t2_col] - retest_df[t1_col]) / retest_df[t1_col]
         else:
             retest_df["retest_difference"] = retest_df[t2_col] - retest_df[t1_col]
@@ -626,14 +648,19 @@ def calculate_swc_te(
 
         # TE and SEM
         te_change = sd_diff  # SD of difference scores
-        icc_value, icc_details = icc_31_from_two_timepoints(df, t1_col, t2_col)
-        if icc_value is not None:
-            sem_change = pre_sd * np.sqrt(1 - icc_value)
+        group_icc = icc_value
+        if group_icc is None:
+            group_icc, icc_details = icc_a1_from_two_timepoints(retest_df, t1_col, t2_col)
+        if not np.isfinite(group_icc) or group_icc > 1:
+            raise ValueError("ICC must be finite and no greater than 1.")
+        if group_icc is not None:
+            sem_single = pre_sd * np.sqrt(1 - group_icc)
+            sem_change = np.sqrt(2) * sem_single
             if use_relative:
+                if pre_mean == 0:
+                    raise ValueError("Relative SEM is undefined when the baseline mean is zero.")
+                sem_single = sem_single / pre_mean
                 sem_change = sem_change / pre_mean
-        else:
-            # Difference-score based SEM: SEM = SD_diff / sqrt(2)
-            sem_change = sd_diff / np.sqrt(2)
 
         # Choose error metric for CI
         if error_metric == "TE":
@@ -648,6 +675,8 @@ def calculate_swc_te(
         intervention_df["analysis_group"] = group_name
         intervention_df["te_change"] = te_change
         intervention_df["sem_change"] = sem_change
+        intervention_df["sem_single_observation"] = sem_single
+        intervention_df["icc_a1"] = group_icc
         intervention_df["error_metric_used"] = error_metric
         intervention_df["interval_margin"] = interval_margin
         intervention_df["interval_lower"] = intervention_df["change"] - interval_margin
@@ -688,6 +717,9 @@ def calculate_swc_te(
             "retest_difference_sd": retest_df["retest_difference"].std(),
             "te_change": te_change,
             "sem_change": sem_change,
+            "sem_single_observation": sem_single,
+            "icc_a1": group_icc,
+            "icc_model": "ICC(A,1): two-way absolute agreement, single measurement",
             "error_metric_used": error_metric,
             "ci_level": ci_level,
             # "z_value": z_value,
