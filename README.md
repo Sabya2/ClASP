@@ -285,6 +285,13 @@ Record the following when using CLASP:
 
 For a published study, cite the exact software version used rather than only the project homepage.
 
+### How to cite CLASP
+
+If you use CLASP in your research, please cite the software version used in your
+analysis.
+
+DOI: [https://doi.org/10.5281/zenodo.23976795](https://doi.org/10.5281/zenodo.23976795)
+
 ## Feedback
 
 Use **Support → Contact / Request Analysis** in the application to request an

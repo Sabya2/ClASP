@@ -220,10 +220,15 @@ if selected_section:
 st.markdown("### Reproducibility and citation")
 st.markdown("Record CLASP version, analysis date, input-data preparation steps, selected variables, statistical method and options, grouping variable (if used), and downloaded output files.")
 
-st.markdown("#### DOI")
-st.markdown("DOI: _[to be added upon release]_")
-
-st.info("Please use this citation upon usage of the tool.")
+st.markdown("#### How to cite CLASP")
+st.markdown(
+    "If you use CLASP in your research, please cite the software version used "
+    "in your analysis."
+)
+st.markdown(
+    "DOI: [https://doi.org/10.5281/zenodo.23976795]"
+    "(https://doi.org/10.5281/zenodo.23976795)"
+)
 
 st.markdown("### Feedback and support")
 st.markdown(
