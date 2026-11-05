@@ -12,7 +12,7 @@ runOnSave = true
 
 
 [theme]
-primaryColor = "#9DCABF"
+primaryColor = "#799c93"
 backgroundColor = "#111827"
 secondaryBackgroundColor = "#1F2937"
 textColor = "#CCE3DD"
