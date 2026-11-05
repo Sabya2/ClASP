@@ -1,4 +1,6 @@
 # CLASP
+[![DOI](https://zenodo.org/badge/1340649612.svg)](https://doi.org/10.5281/zenodo.23976795)
+
 
 ## CLinical and Statistical Analysis Software Platform
 
