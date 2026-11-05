@@ -46,8 +46,8 @@ def plot_correlation_heatmap_with_significance_plotly(
     title: str = "Correlation Heatmap",
     method: str = "spearman",
     min_abs_corr: float = 0.0,
-    width: int = 900,
-    height: int = 900,
+    width: int = 1000,
+    height: int = 1000,
     show_text: bool = True,
     # wrap_width: int = 18,
     keep_diagonal: bool = False,
@@ -74,6 +74,7 @@ def plot_correlation_heatmap_with_significance_plotly(
     z = corr.mask(threshold_mask, np.nan)
     p_show = pvals.mask(threshold_mask, np.nan)
     text = annotated.mask(threshold_mask, "")
+    # print(text.values)
 
     label_map = {
         "pearson": "Pearson r",
@@ -107,7 +108,7 @@ def plot_correlation_heatmap_with_significance_plotly(
             y=list(z.index),
             text=text.values if show_text else None,
             texttemplate="%{text}" if show_text else None,
-            textfont={"size": 10},
+            textfont={"size": 7},
             colorscale="RdBu_r",
             zmin=-1,
             zmax=1,
