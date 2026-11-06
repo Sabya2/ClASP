@@ -2,7 +2,8 @@ cff-version: 1.2.0
 message: "If you use CLASP, cite the archived release used for your analysis."
 title: "CLASP: CLinical and Statistical Analysis Software Platform"
 type: software
-version: 0.1.0-dev
+version: 1.0.0
+date-released: 2026-11-05
 authors:
   - given-names: Sabyasachi
     family-names: Chakrabarty
