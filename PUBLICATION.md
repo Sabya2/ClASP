@@ -39,5 +39,4 @@ has been performed as part of this preparation.
 - No Git tag or existing release was present during this review.
 - No current licence file was present. Distribution rights and licence choice must
   be confirmed by the author/rightsholder before a licence file is added.
-- Version `0.1.0-dev` identifies the reviewed development state; the release number
-  remains an author/maintainer decision.
+- Version `1.0.0` identifies the public release used for the publication record.
