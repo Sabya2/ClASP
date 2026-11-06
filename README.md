@@ -8,7 +8,7 @@ CLASP is a Streamlit-based platform for exploratory clinical and statistical dat
 
 > **Important:** CLASP supports statistical analysis but does not replace careful study design, domain expertise, diagnostic checks, or independent statistical review. Results should be interpreted in the context of the study design and data quality.
 
-Current development version: `0.1.0-dev`. This is not yet a tagged release.
+Current release version: `1.0.0`.
 
 ## Installation and launch
 
