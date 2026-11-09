@@ -47,7 +47,7 @@ def test_regression_explanations_use_variable_type_and_small_values():
     assert "causality" in text
 
 
-def test_grouped_univariate_models_use_each_subgroup_observations():
+def test_grouped_bivariate_models_use_each_subgroup_observations():
     df = pd.DataFrame({
         "group": ["a"] * 4 + ["b"] * 4 + ["invalid"] * 2,
         "x": [0, 1, 2, 3, 0, 1, 2, 3, 1, 1],

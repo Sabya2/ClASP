@@ -1,4 +1,4 @@
-"""Univariate and multivariable OLS analysis UI."""
+"""Bivariate and multivariable OLS analysis UI."""
 
 import re
 
@@ -269,7 +269,7 @@ def _build_model_explanation(model, outcome, predictors,
 
 
 
-def _plot_univariate(
+def _plot_bivariate(
     ax,
     data,
     x_col,
@@ -279,7 +279,7 @@ def _plot_univariate(
     add_reg=True,
     plot_mode="multicolor",
 ):
-    """Draw a univariate scatterplot, optionally stratified by group."""
+    """Draw a bivariate scatterplot, optionally stratified by group."""
 
 
     # -----------------------------------------
@@ -551,11 +551,11 @@ def _render_explanation(explanation, outcome, analysis_mode="Multivariable OLS")
 
 def render_ols_page(df, continuous_cols, categorical_cols, group_col):
     """
-    Render a Streamlit page for univariate and multivariable OLS analysis.
+    Render a Streamlit page for bivariate and multivariable OLS analysis.
 
     The page follows the layout pattern of render_linear_page:
     - variable selectors
-    - optional group handling for univariate scatter plots
+    - optional group handling for bivariate scatter plots
     - visual style controls
     - plot grid / forest plot / heatmap
     - expandable statistics and interpretation panels
@@ -584,14 +584,18 @@ def render_ols_page(df, continuous_cols, categorical_cols, group_col):
     # Page controls
     # -----------------------------------------------------
 
+    # Migrate sessions created before the terminology was corrected.
+    if st.session_state.get("ols_analysis_mode") == "Univariate Analysis":
+        st.session_state["ols_analysis_mode"] = "Bivariate Analysis"
+
     analysis_mode = st.pills(
         "Analysis type",
-        options=["Univariate Analysis", "Multivariate Analysis"],
+        options=["Bivariate Analysis", "Multivariate Analysis"],
         selection_mode="single",
         default=None,
         key="ols_analysis_mode",
         help=(
-            "Univariate OLS fits one predictor at a time. Multivariable OLS "
+            "Bivariate OLS analyzes one predictor and one outcome at a time. Multivariable OLS "
             "fits selected predictors jointly."
         ),
     )
@@ -599,10 +603,10 @@ def render_ols_page(df, continuous_cols, categorical_cols, group_col):
     plot_mode = "multicolor"
 
     # -----------------------------------------------------
-    # Univariate OLS page
+    # Bivariate OLS page
     # -----------------------------------------------------
-    if analysis_mode == "Univariate Analysis":
-        _render_univariate_ols_section(df, continuous_cols, categorical_cols, group_col, plot_mode=plot_mode)
+    if analysis_mode == "Bivariate Analysis":
+        _render_bivariate_ols_section(df, continuous_cols, categorical_cols, group_col, plot_mode=plot_mode)
         return
 
     # -----------------------------------------------------
@@ -613,9 +617,9 @@ def render_ols_page(df, continuous_cols, categorical_cols, group_col):
         return
 
 
-def _render_univariate_ols_section(df, continuous_cols, categorical_cols, group_col, plot_mode):
-    """Render pairwise/univariate OLS scatterplot section."""
-    st.markdown("### Univariate OLS")
+def _render_bivariate_ols_section(df, continuous_cols, categorical_cols, group_col, plot_mode):
+    """Render the bivariate OLS scatterplot section."""
+    st.markdown("### Bivariate OLS")
 
     v1, v2 = st.columns([1, 1], border=True, gap="small")
     with v2:
@@ -729,7 +733,7 @@ def _render_univariate_ols_section(df, continuous_cols, categorical_cols, group_
                 # -----------------------------------------
                 # Plot
                 # -----------------------------------------
-                plot_data = _plot_univariate(
+                plot_data = _plot_bivariate(
                     ax=ax, data=df, x_col=x_col, y_col=y_col,
                     group_col=plot_group_col if plot_by_group else None,
                     selected_groups=selected_groups,
@@ -808,7 +812,7 @@ def _render_univariate_ols_section(df, continuous_cols, categorical_cols, group_
                     if plot_by_group and plot_group_col and selected_groups:
                         group_stats_lines = []
 
-                        # Use the same finite numeric data plotted by _plot_univariate().
+                        # Use the same finite numeric data plotted by _plot_bivariate().
                         stats_columns = [x_col, y_col, plot_group_col]
                         stats_data = df[stats_columns].copy()
                         stats_data[x_col] = _safe_numeric_series(stats_data, x_col)
@@ -894,7 +898,7 @@ def _render_univariate_ols_section(df, continuous_cols, categorical_cols, group_
                 st.download_button(
                     label=f"Download {y_col} vs {x_col}",
                     data=buf,
-                    file_name=f"univariate_ols_{x_col}_vs_{y_col}.png",
+                    file_name=f"bivariate_ols_{x_col}_vs_{y_col}.png",
                     mime="image/png",
                     key=f"uniols_download_{x_col}_{y_col}",
                 )

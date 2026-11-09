@@ -87,7 +87,7 @@ GUIDE_CONTENT = {
             "Calculate Pearson, Spearman, or Kendall correlation matrices and display interactive heatmaps, optionally stratified by group."
         ],
         "Regression": [
-            "Fit univariate or multivariable linear models, view adjusted coefficients, and explore X–Y relationships with interactive pair plots."
+            "Fit bivariate or multivariable linear models, view adjusted coefficients, and explore X–Y relationships with interactive pair plots."
         ],
         "Responders": [
             "Classify individual responses using Smallest Worthwhile Change (SWC) and Typical Error (TE), with responder plots and downloadable results."

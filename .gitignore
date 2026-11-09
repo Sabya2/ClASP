@@ -37,6 +37,7 @@ x_old/
 
 /codex.md
 /test_1.ipynb
+user_guide/
 
 # Reproducible validation assets are intentionally versioned.
 !.github/workflows/*.yml

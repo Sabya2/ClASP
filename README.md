@@ -154,11 +154,11 @@ A correlation describes an association, not necessarily a causal relationship. P
 
 The OLS Regression page provides three complementary views of linear relationships:
 ```text
-(Univariate) Y = intercept + beta × X + error
+(Bivariate) Y = intercept + beta × X + error
 (Multivariate) Y = beta0 + beta1 X1 + beta2 X2 + ... + betak Xk + error
 ```
 
-1. Univariate OLS regression.
+1. Bivariate OLS regression.
 2. Multivariable OLS regression.
 3. An interactive pair plot for one selected X–Y relationship.
 
@@ -170,9 +170,9 @@ The OLS Regression page provides three complementary views of linear relationshi
 - Optional categorical predictors.
 - Optional grouping variable for plots.
 
-### Univariate OLS
+### Bivariate OLS
 
-Univariate OLS fits one model for each selected outcome–predictor pair:
+Bivariate OLS fits one model for each selected outcome–predictor pair:
 
 ```text
 Y = intercept + beta × X + error

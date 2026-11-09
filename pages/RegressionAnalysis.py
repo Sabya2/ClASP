@@ -27,7 +27,7 @@ with st.expander("How this page works and what to expect", expanded=False):
 
         This section has two modes:
 
-        #### Univariate OLS
+        #### Bivariate OLS
 
         - **What it does**: Fits one simple OLS model at a time (Y ~ X) for each selected X–Y pair.
         - **Output**:
@@ -46,7 +46,7 @@ with st.expander("How this page works and what to expect", expanded=False):
                   - Visual inspection of linearity, outliers, and group differences.
                   - Expandable panels with:
                     - Pearson/Spearman correlation (r, p-value).
-                    - Univariate OLS results (beta, intercept, R, R, RMSE).
+                    - Bivariate OLS results (beta, intercept, R², RMSE).
                 - **When to use**: Quick exploratory check of bivariate relationships before formal modeling.
 
 
@@ -95,7 +95,7 @@ with st.expander("How this page works and what to expect", expanded=False):
           - One high-resolution scatterplot.
           - Expandable panel with:
             - Correlation statistics.
-            - Full univariate OLS model summary (beta, SE, t, p, R, intercept, RMSE).
+            - Full bivariate OLS model summary (beta, SE, t, p, R², intercept, RMSE).
             - Interpretation of the slope in plain language.
         - **When to use**: When you want to inspect one relationship in detail, including residuals and model diagnostics.
 
@@ -114,7 +114,7 @@ with st.expander("How this page works and what to expect", expanded=False):
 
 
 
-# --- 1. OLS regression analysis (univariate + multivariable) ---
+# --- 1. OLS regression analysis (bivariate + multivariable) ---
 if df is not None and len(continuous_cols) >= 2:
     render_ols_page(
         df=df,
