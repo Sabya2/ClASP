@@ -10,11 +10,12 @@ HELP_TOPICS = {
     "Missing data": "pages/DataDescription.py",
     "Histograms": "pages/DataDistribution.py",
     "Density plots": "pages/DataDistribution.py",
-    "Scatter plots": "pages/RegressionAnalysis.py",
+    "Scatter plots": "pages/InteractivePlots.py",
+    "Interactive plots": "pages/InteractivePlots.py",
     "Linear regression": "pages/RegressionAnalysis.py",
     "Correlation": "pages/Correlation.py",
     "Correlation heatmaps": "pages/Correlation.py",
-    "Box plots": "pages/GroupComparison.py",
+    "Box plots": "pages/InteractivePlots.py",
     "Violin plots": "pages/GroupComparison.py",
     "Group tests": "pages/GroupComparison.py",
     "Mediation": "pages/Mediation.py",
@@ -87,7 +88,10 @@ GUIDE_CONTENT = {
             "Calculate Pearson, Spearman, or Kendall correlation matrices and display interactive heatmaps, optionally stratified by group."
         ],
         "Regression": [
-            "Fit bivariate or multivariable linear models, view adjusted coefficients, and explore X–Y relationships with interactive pair plots."
+            "Fit bivariate or multivariable linear models and view adjusted coefficients, confidence intervals, and model explanations."
+        ],
+        "Interactive plots": [
+            "Open the Interactive Plots page to explore hoverable linear scatter plots with OLS trends or box plots with optional categorical grouping and raw observations."
         ],
         "Responders": [
             "Classify individual responses using Smallest Worthwhile Change (SWC) and Typical Error (TE), with responder plots and downloadable results."

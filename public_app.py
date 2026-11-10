@@ -17,6 +17,7 @@ DEFAULT_PAGE_CONFIG = {
     "HomePage.py": {"title": "HomePage", "icon": "🏠"},
     "DataDescription.py": {"title": "Data Summary", "icon": "📋"},
     "DataDistribution.py": {"title": "Data Distribution", "icon": "📊"},
+    "InteractivePlots.py": {"title": "Interactive Plots", "icon": "🖱️"},
     "RegressionAnalysis.py": {"title": "Regression Analysis", "icon": "📈"},
     "Correlation.py": {"title": "Correlation Analysis", "icon": "🔗"},
     "GroupComparison.py": {"title": "Group Comparison Analysis", "icon": "⚖️"},

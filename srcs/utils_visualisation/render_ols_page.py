@@ -196,6 +196,16 @@ def _build_equation(model, outcome, categorical_vars):
 
     return "\n".join(lines)
 
+
+def _build_symbolic_equation(outcome, predictors):
+    """Build a readable symbolic equation for all selected predictors."""
+    predictor_terms = " ".join(
+        f"+ β{index}×({predictor})"
+        for index, predictor in enumerate(predictors, start=1)
+    )
+    return f"{outcome} = β0 {predictor_terms} + ε"
+
+
 def _coefficient_interpretation(term, beta, ci_low, ci_high, p_value, outcome,
                                 additional_covars, data):
     """Create manuscript-style, conditional interpretation for one coefficient."""
@@ -365,12 +375,20 @@ def _plot_forest_by_predictor(coefficient_table, predictor):
         return None
 
     plot_data = plot_data.sort_values(["outcome", "term"]).reset_index(drop=True)
+    terms_per_outcome = plot_data.groupby("outcome")["term"].transform("size")
+    plot_data["plot_label"] = [
+        outcome if term_count == 1
+        else f"{outcome} | {_term_to_readable(term)}"
+        for outcome, term, term_count in zip(
+            plot_data["outcome"], plot_data["term"], terms_per_outcome
+        )
+    ]
 
     fig_height = max(1.8, 0.65 * len(plot_data) + 1.8)
     fig, ax = plt.subplots(figsize=(8.5, fig_height))
 
     for idx, row in plot_data.iterrows():
-        color = ("#7CB218" if row["p_value"] < 0.05 else "#AF5D5D")
+        color = "#2E7D32" if row["p_value"] < 0.05 else "#607D8B"
         ax.errorbar(
             x=row["beta"], y=idx,
             xerr=[[row["beta"] - row["ci_low"]], [row["ci_high"] - row["beta"]]],
@@ -379,22 +397,102 @@ def _plot_forest_by_predictor(coefficient_table, predictor):
 
     ax.axvline(0,color="black",linestyle="--",linewidth=1)
     ax.set_yticks(range(len(plot_data)))
-    ax.set_yticklabels(plot_data["term_display"])
-    ax.set_yticklabels(plot_data["outcome"])
-    ax.set_xlabel(f"Adjusted beta coefficient (95% CI) of {predictor} for each outcome")
-    ax.set_title(f"Forest Plot: Primary predictor [{predictor}] across each outcome")
+    ax.set_yticklabels(plot_data["plot_label"])
+    ax.invert_yaxis()
+    ax.set_xlabel("Adjusted beta coefficient (95% CI)")
+    ax.set_title(f"{predictor} across fitted outcomes")
     ax.grid(axis="x", alpha=0.25)
 
     for idx, row in plot_data.iterrows():
-        p = f"p = {row['p_value']:.3f} {stars(row['p_value'])}"
+        p = f"p = {_format_pvalue(row['p_value'])} {stars(row['p_value'])}"
         ax.text( 1.02, idx, p,
             transform=ax.get_yaxis_transform(),
-            color = ("#75B302" if row["p_value"] < 0.05 else "#AF5D5D"),
+            color = ("#2E7D32" if row["p_value"] < 0.05 else "#607D8B"),
             clip_on=False, va="center", ha="left", fontsize=8
             )
     fig.tight_layout()
 
     return fig
+
+
+def _partial_regression_data(model, term):
+    """Residualize one model term and the outcome against all other terms."""
+    term_names = list(model.model.exog_names)
+    if term not in term_names:
+        raise ValueError(f"Model term not found: {term}")
+
+    exog = np.asarray(model.model.exog, dtype=float)
+    outcome_values = np.asarray(model.model.endog, dtype=float)
+    term_index = term_names.index(term)
+    predictor_values = exog[:, term_index]
+    control_indices = [index for index in range(exog.shape[1]) if index != term_index]
+
+    if control_indices:
+        controls = exog[:, control_indices]
+        predictor_fit = controls @ np.linalg.lstsq(
+            controls, predictor_values, rcond=None
+        )[0]
+        outcome_fit = controls @ np.linalg.lstsq(
+            controls, outcome_values, rcond=None
+        )[0]
+        predictor_residuals = predictor_values - predictor_fit
+        outcome_residuals = outcome_values - outcome_fit
+    else:
+        predictor_residuals = predictor_values.copy()
+        outcome_residuals = outcome_values.copy()
+
+    return pd.DataFrame({
+        "Adjusted predictor component": predictor_residuals,
+        "Adjusted outcome component": outcome_residuals,
+    })
+
+
+def _plot_adjusted_scatter(model, outcome, term):
+    """Create a bivariate-style partial-regression scatterplot for one term."""
+    plot_data = _partial_regression_data(model, term)
+    if plot_data.empty or plot_data["Adjusted predictor component"].nunique() < 2:
+        return None, plot_data
+
+    fig, ax = plt.subplots(figsize=(7.5, 5.0))
+    sns.regplot(
+        data=plot_data,
+        x="Adjusted predictor component",
+        y="Adjusted outcome component",
+        ax=ax,
+        ci=95,
+        scatter_kws={"alpha": 0.85, "edgecolor": "white", "s": 36},
+        line_kws={"linewidth": 1.6, "color": "#B2182B"},
+    )
+    ax.axhline(0, color="gray", linestyle=":", linewidth=0.8, alpha=0.7)
+    ax.axvline(0, color="gray", linestyle=":", linewidth=0.8, alpha=0.7)
+    ax.set_title(f"{outcome} vs {_term_to_readable(term)} (adjusted relationship)")
+    ax.set_xlabel(f"{_term_to_readable(term)}, adjusted for other predictors")
+    ax.set_ylabel(f"{outcome}, adjusted for other predictors")
+    ax.grid(alpha=0.2)
+    fig.tight_layout()
+    return fig, plot_data
+
+
+def _forest_interpretation_lines(plot_data, layout):
+    """Return plot-specific explanations for displayed forest coefficients."""
+    lines = []
+    for _, row in plot_data.iterrows():
+        term = _term_to_readable(row["term"])
+        estimate = (
+            f"beta = {row['beta']:.3f}, 95% CI {row['ci_low']:.3f} to "
+            f"{row['ci_high']:.3f}, p = {_format_pvalue(row['p_value'])}"
+        )
+        if layout == "Combined":
+            lines.append(
+                f"**{row['outcome']}:** adjusted association of {term} with "
+                f"{row['outcome']} ({estimate})."
+            )
+        else:
+            lines.append(
+                f"**{term}:** adjusted association with {row['outcome']} "
+                f"({estimate})."
+            )
+    return lines
 
 
 def _plot_beta_heatmap(explanations, outcomes, predictors):
@@ -1010,17 +1108,37 @@ def _render_multivariable_ols_section(
     # -----------------------------------------------------
     # 3. Model options
     # -----------------------------------------------------
-    robust_se = st.checkbox("Use HC3 robust standard errors",
-        value=False,
-        key="multiols_robust_se",
-        help=("Changes standard errors, confidence intervals, and p-values. "
-              "Coefficient estimates remain unchanged."
-        ),
-    )
+
+
+    role_left, role_right = st.columns([3, 1],border=False,gap="small",)
+    with role_right:
+        robust_se = st.checkbox("Use HC3 robust standard errors",
+            value=False,
+            key="multiols_robust_se",
+            help=("Changes standard errors, confidence intervals, and p-values. "
+                  "Coefficient estimates remain unchanged."
+            ),
+        )
+
+    with role_left:
+        st.markdown("### Combined Forest plot or separate linear plots?")
+        forest_layout = st.pills(
+            "Plot layout",
+            options=["Separate", "Combined"],
+            default="Separate",
+            selection_mode="single",
+            key="multiols_forest_layout",
+            help=(
+                "Separate creates adjusted scatterplots for every outcome–primary-"
+                "predictor pair. Combined preserves the predictor-across-outcomes "
+                "forest-plot view."
+            ),
+        )
 
     if primary_predictors is not None and len(primary_predictors) > 0:
         run_analysis = st.button("Run multivariable OLS analysis",
-                                 type="primary",key="multiple_ols_run_button",)
+                                 type="primary",key="multiple_ols_run_button",
+                                 use_container_width=True,)
         if not run_analysis:
             st.info(
                         "Select outcomes and predictors, then click "
@@ -1113,40 +1231,204 @@ def _render_multivariable_ols_section(
         return
 
     all_coefficients = pd.concat(coefficient_tables,ignore_index=True,)
+    if all_coefficients.empty:
+        st.warning("No coefficients were found for the selected primary predictors.")
+        return
 
     # -----------------------------------------------------
     # 8. Forest plots
     # -----------------------------------------------------
     st.markdown("### Adjusted estimates")
 
-    st.caption(
-        "Each forest plot shows one primary predictor across all fitted "
-        "outcomes. Points are adjusted beta coefficients with 95% confidence intervals."
-    )
-
-    for predictor in primary_predictors:
-        predictor_data = all_coefficients[all_coefficients["predictor"] == predictor].copy()
-
-        if predictor_data.empty:
-            st.warning(f"No fitted coefficient found for primary predictor: {predictor}")
-            continue
-
-        fig = _plot_forest_by_predictor(coefficient_table=all_coefficients,predictor=predictor,)
-
-        if fig is None:
-            continue
-
-        st.pyplot(fig,width="stretch",)
-        forest_buffer = get_figure_download(fig)
-
-        st.download_button(label=f"Download forest plot: {predictor}",
-            data=forest_buffer,
-            file_name=(f"multivariable_ols_forest_"f"{predictor}.png"),
-            mime="image/png",
-            key=f"multivariable_ols_forest_download_{predictor}",
+    if forest_layout == "Combined":
+        st.caption(
+            "Combined view compares one primary predictor across all fitted "
+            "outcomes. Each predictor is presented in its own summary card."
         )
 
-        plt.close(fig)
+        for predictor in primary_predictors:
+            predictor_data = all_coefficients[
+                all_coefficients["predictor"] == predictor
+            ].copy().sort_values(["outcome", "term"])
+            if predictor_data.empty:
+                st.warning(f"No fitted coefficient found for primary predictor: {predictor}")
+                continue
+
+            fig = _plot_forest_by_predictor(all_coefficients, predictor)
+            if fig is None:
+                continue
+
+            other_predictors = [
+                variable for variable in x_cols if variable != predictor
+            ]
+            adjustment_text = (
+                ", ".join(other_predictors)
+                if other_predictors else "no other predictors"
+            )
+
+            with st.container(border=True):
+                st.markdown(f"#### Primary predictor: {predictor}")
+                st.caption(
+                    f"Compared across {predictor_data['outcome'].nunique()} fitted "
+                    f"outcome(s) | Adjusted for: {adjustment_text}"
+                )
+                st.pyplot(fig, width="stretch")
+                st.markdown(
+                    f"**Simple interpretation:** Each point shows the adjusted "
+                    f"association of **{predictor}** with the outcome named on its "
+                    "row. Horizontal lines are 95% confidence intervals; the dashed "
+                    "vertical line represents no association. Green points have "
+                    "p < 0.05 and gray points have p ≥ 0.05."
+                )
+
+                with st.expander("Detailed outcome estimates", expanded=False):
+                    for line in _forest_interpretation_lines(
+                        predictor_data, "Combined"
+                    ):
+                        st.markdown(f"- {line}")
+                    st.caption(
+                        "Coefficient sizes are expressed in each outcome's original "
+                        "units. Magnitudes should not be compared directly when the "
+                        "outcomes use different scales."
+                    )
+
+                forest_buffer = get_figure_download(fig)
+                st.download_button(
+                    label=f"Download forest plot: {predictor}",
+                    data=forest_buffer,
+                    file_name=f"multivariable_ols_combined_forest_{predictor}.png",
+                    mime="image/png",
+                    key=f"multivariable_ols_combined_forest_download_{predictor}",
+                    use_container_width=True,
+                )
+            plt.close(fig)
+    else:
+        st.caption(
+            "Separate view: each outcome–primary-predictor pair is shown as an "
+            "adjusted scatterplot. These are partial-regression plots, so the "
+            "fitted slope equals the predictor's coefficient in the full model. "
+            "Plots are grouped by outcome, with up to three predictors per row."
+        )
+
+        for outcome in fitted_outcomes:
+            outcome_data = all_coefficients[
+                all_coefficients["outcome"] == outcome
+            ].copy()
+            if outcome_data.empty:
+                st.warning(f"No primary-predictor coefficients found for outcome: {outcome}")
+                continue
+
+            # with st.container(border=True):
+            with st.expander(f'Outcome: {outcome}', expanded=True):
+                # st.markdown(f"#### Outcome: {outcome}")
+                st.markdown("**Complete model equation**")
+                # st.code(
+                #     _build_symbolic_equation(outcome, x_cols),
+                #     language=None,
+                #     wrap_lines=True,
+                # )
+                # st.markdown("**Fitted equation**")
+                st.code(
+                    explanations[outcome]["equation"],
+                    language=None,
+                    wrap_lines=True,
+                )
+                st.caption(
+                    "Each beta belongs to the predictor in the same position. "
+                    "Every coefficient is estimated while holding the other "
+                    "predictors in this equation constant."
+                )
+
+            outcome_coefficients = [
+                coefficient for _, coefficient in outcome_data.iterrows()
+            ]
+
+            for row_start in range(0, len(outcome_coefficients), 3):
+                row_coefficients = outcome_coefficients[row_start:row_start + 3]
+                plot_columns = st.columns(len(row_coefficients), gap="small")
+
+                for plot_column, coefficient in zip(
+                    plot_columns, row_coefficients
+                ):
+                    with plot_column:
+                        term = coefficient["term"]
+                        fig, partial_data = _plot_adjusted_scatter(
+                            results[outcome], outcome, term
+                        )
+                        if fig is None:
+                            st.warning(
+                                f"Adjusted scatterplot could not be created for "
+                                f"{outcome} vs {_term_to_readable(term)}."
+                            )
+                            continue
+
+                        st.pyplot(fig, width="stretch")
+                        other_predictors = [
+                            predictor for predictor in x_cols
+                            if predictor != coefficient["predictor"]
+                        ]
+                        if other_predictors:
+                            adjusted_for = ", ".join(other_predictors)
+                        #     st.markdown(
+                        #         f"**Simple interpretation:** The beta for "
+                        #         f"**{_term_to_readable(term)}** represents its "
+                        #         f"association with **{outcome}**, adjusted for "
+                        #         f"{adjusted_for}."
+                        #     )
+                        # else:
+                        #     st.markdown(
+                        #         f"**Simple interpretation:** The beta for "
+                        #         f"**{_term_to_readable(term)}** represents its "
+                        #         f"unadjusted association with **{outcome}**."
+                        #     )
+
+                        with st.expander(
+                            "**Interpretation**", expanded=False):
+                            st.markdown(
+                                        f"The beta for "
+                                        f"**{_term_to_readable(term)}** represents its "
+                                        f"association with **{outcome}**, adjusted for "
+                                        f"{adjusted_for}. "
+                                        "The lineear line is the adjusted linear relationship; "
+                                        "its slope equals the coefficient from the full "
+                                        "multivariable model."
+                            )
+
+                            # st.markdown(
+                            #     f"Each point compares the part of "
+                            #     f"**{_term_to_readable(term)}** not explained by "
+                            #     f"the other selected predictors with the part of "
+                            #     f"**{outcome}** not explained by those predictors. "
+                            #     "The red line is the adjusted linear relationship; "
+                            #     "its slope equals the coefficient from the full "
+                            #     "multivariable model."
+                            # )
+                            for line in _forest_interpretation_lines(
+                                pd.DataFrame([coefficient]), "Separate"
+                            ):
+                                st.markdown(f"- {line}")
+
+                        scatter_buffer = get_figure_download(fig)
+                        safe_term = re.sub(
+                            r"[^A-Za-z0-9_.-]+", "_", str(term)
+                        )
+                        st.download_button(
+                            label=(
+                                f"Download adjusted scatterplot: {outcome} vs "
+                                f"{_term_to_readable(term)}"
+                            ),
+                            data=scatter_buffer,
+                            file_name=(
+                                f"multivariable_ols_adjusted_scatter_"
+                                f"{outcome}_{safe_term}.png"
+                            ),
+                            mime="image/png",
+                            key=(
+                                f"multivariable_ols_adjusted_scatter_download_"
+                                f"{outcome}_{safe_term}"
+                            ),
+                        )
+                        plt.close(fig)
 
     # -----------------------------------------------------
     # 9. Optional heatmap

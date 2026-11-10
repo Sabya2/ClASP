@@ -15,7 +15,8 @@ def test_main_application_starts_without_streamlit_exception():
 @pytest.mark.parametrize(
     "page",
     [
-        "DataDescription.py", "DataDistribution.py", "RegressionAnalysis.py",
+        "DataDescription.py", "DataDistribution.py", "InteractivePlots.py",
+        "RegressionAnalysis.py",
         "Correlation.py", "GroupComparison.py", "Temporal-Dynamics.py",
         "Responder.py", "Contact-Request.py",
     ],
@@ -40,6 +41,28 @@ def test_supported_page_starts_with_synthetic_data(page):
         app.session_state[key] = value
     app.run(timeout=20)
     assert not app.exception
+
+
+def test_interactive_plots_page_renders_box_plot_mode():
+    df = pd.read_csv(PROJECT_ROOT / "tests/data/synthetic_clinical.csv")
+    app = AppTest.from_file(str(PROJECT_ROOT / "pages/InteractivePlots.py"))
+    state = {
+        "df": df,
+        "continuous_cols": ["outcome", "predictor", "pre", "post"],
+        "categorical_cols": ["group"],
+        "group_col": "group",
+        "participants_col": "participant_id",
+        "interactive_plots_page_type": "Box plot",
+    }
+    for key, value in state.items():
+        app.session_state[key] = value
+
+    app.run(timeout=20)
+
+    assert not app.exception
+    assert app.get("plotly_chart")
+    assert "Continuous variable" in [element.label for element in app.selectbox]
+    assert "Group variable" in [element.label for element in app.selectbox]
 
 
 @pytest.mark.parametrize(

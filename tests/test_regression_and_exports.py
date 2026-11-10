@@ -10,9 +10,19 @@ from PIL import Image
 from srcs.utils_visualisation.common import get_figure_download
 from srcs.utils_visualisation.render_ols_page import (
     _build_model_explanation,
+    _build_symbolic_equation,
+    _forest_interpretation_lines,
     _fit_ols_model,
     _model_terms_table,
+    _partial_regression_data,
+    _plot_adjusted_scatter,
+    _plot_forest_by_predictor,
 )
+
+
+def test_symbolic_equation_maps_each_beta_to_its_predictor():
+    equation = _build_symbolic_equation("BP", ["BMI", "Age", "Smoking"])
+    assert equation == "BP = β0 + β1×(BMI) + β2×(Age) + β3×(Smoking) + ε"
 
 
 def test_ols_covariance_checkbox_matches_statsmodels_reference():
@@ -68,6 +78,48 @@ def test_grouped_bivariate_models_use_each_subgroup_observations():
         assert explanation["coefficient_table"].iloc[0]["beta"] == pytest.approx(slope)
     invalid = df.loc[df.group == "invalid"]
     assert len(invalid) < 3 or invalid.x.nunique() < 2
+
+
+def test_separate_adjusted_scatter_slope_matches_multivariable_beta():
+    df = pd.DataFrame({
+        "x": np.arange(12, dtype=float),
+        "z": [0, 1, 0, 2, 1, 3, 2, 4, 3, 5, 4, 6],
+    })
+    df["y"] = 2.0 + 1.5 * df["x"] - 0.7 * df["z"]
+    model, _ = _fit_ols_model(df, "y", ["x", "z"], ["x"], [], False)
+
+    partial_data = _partial_regression_data(model, "x")
+    partial_slope = np.polyfit(
+        partial_data["Adjusted predictor component"],
+        partial_data["Adjusted outcome component"],
+        1,
+    )[0]
+    assert partial_slope == pytest.approx(model.params["x"])
+
+    fig, plotted_data = _plot_adjusted_scatter(model, "y", "x")
+    assert fig is not None
+    assert len(plotted_data) == len(df)
+    assert "adjusted relationship" in fig.axes[0].get_title()
+    plt.close(fig)
+
+
+def test_combined_forest_plot_uses_clear_outcome_labels():
+    coefficients = pd.DataFrame({
+        "outcome": ["BP", "HR"],
+        "predictor": ["BMI", "BMI"],
+        "term": ["BMI", "BMI"],
+        "term_display": ["BP: BMI", "HR: BMI"],
+        "beta": [1.2, -0.4],
+        "ci_low": [0.5, -0.8],
+        "ci_high": [1.9, 0.0],
+        "p_value": [0.01, 0.05],
+    })
+
+    fig = _plot_forest_by_predictor(coefficients, "BMI")
+    assert fig.axes[0].get_title() == "BMI across fitted outcomes"
+    assert [tick.get_text() for tick in fig.axes[0].get_yticklabels()] == ["BP", "HR"]
+    assert fig.axes[0].get_xlabel() == "Adjusted beta coefficient (95% CI)"
+    plt.close(fig)
 
 
 def test_figure_download_serializes_supplied_figure_and_rewinds():
