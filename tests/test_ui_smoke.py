@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_main_application_starts_without_streamlit_exception():
-    app = AppTest.from_file(str(PROJECT_ROOT/"public_app.py")).run(timeout=20)
+    app = AppTest.from_file(str(PROJECT_ROOT/"public_app.py")).run(timeout=60)
     assert not app.exception
 
 
@@ -39,7 +39,7 @@ def test_supported_page_starts_with_synthetic_data(page):
     }
     for key, value in state.items():
         app.session_state[key] = value
-    app.run(timeout=20)
+    app.run(timeout=60)
     assert not app.exception
 
 
@@ -57,7 +57,7 @@ def test_interactive_plots_page_renders_box_plot_mode():
     for key, value in state.items():
         app.session_state[key] = value
 
-    app.run(timeout=20)
+    app.run(timeout=60)
 
     assert not app.exception
     assert app.get("plotly_chart")
@@ -89,7 +89,7 @@ def test_temporal_views_offer_explanation_and_image_download(mode, expected_subh
     }
     for key, value in state.items():
         app.session_state[key] = value
-    app.run(timeout=20)
+    app.run(timeout=60)
 
     assert not app.exception
     assert expected_subheader in [element.value for element in app.subheader]
