@@ -96,10 +96,16 @@ def test_separate_adjusted_scatter_slope_matches_multivariable_beta():
     )[0]
     assert partial_slope == pytest.approx(model.params["x"])
 
-    fig, plotted_data = _plot_adjusted_scatter(model, "y", "x")
+    fig, plotted_data = _plot_adjusted_scatter(model, "y", "x", predictor="x")
     assert fig is not None
     assert len(plotted_data) == len(df)
-    assert "adjusted relationship" in fig.axes[0].get_title()
+    assert list(plotted_data.columns) == ["x", "y"]
+    np.testing.assert_allclose(plotted_data["x"], df["x"])
+    np.testing.assert_allclose(plotted_data["y"], df["y"])
+    assert fig.axes[0].get_xlabel() == "x (observed values)"
+    assert fig.axes[0].get_ylabel() == "y (observed values)"
+    adjusted_line = next(line for line in fig.axes[0].lines if line.get_label() == "Adjusted model estimate")
+    assert np.polyfit(adjusted_line.get_xdata(), adjusted_line.get_ydata(), 1)[0] == pytest.approx(model.params["x"])
     plt.close(fig)
 
 

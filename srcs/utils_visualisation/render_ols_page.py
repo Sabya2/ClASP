@@ -447,27 +447,95 @@ def _partial_regression_data(model, term):
     })
 
 
-def _plot_adjusted_scatter(model, outcome, term):
-    """Create a bivariate-style partial-regression scatterplot for one term."""
-    plot_data = _partial_regression_data(model, term)
-    if plot_data.empty or plot_data["Adjusted predictor component"].nunique() < 2:
+def _plot_adjusted_scatter(model, outcome, term, predictor=None):
+    """Plot observed values with a covariate-adjusted conditional fit.
+
+    Points and both axes remain in the imported variables' original units.  The
+    fitted line/points come from the full model while other predictors are held
+    at their median (numeric) or reference category (categorical).
+    """
+    model_frame = model.model.data.frame.copy()
+    predictor = predictor or term
+    if predictor not in model_frame or outcome not in model_frame:
+        raise ValueError(f"Raw plotting columns are unavailable for model term: {term}")
+
+    plot_data = model_frame[[predictor, outcome]].replace([np.inf, -np.inf], np.nan).dropna()
+    if plot_data.empty or plot_data[predictor].nunique() < 2:
         return None, plot_data
 
-    fig, ax = plt.subplots(figsize=(7.5, 5.0))
-    sns.regplot(
-        data=plot_data,
-        x="Adjusted predictor component",
-        y="Adjusted outcome component",
-        ax=ax,
-        ci=95,
-        scatter_kws={"alpha": 0.85, "edgecolor": "white", "s": 36},
-        line_kws={"linewidth": 1.6, "color": "#B2182B"},
+    categorical = (
+        isinstance(model_frame[predictor].dtype, pd.CategoricalDtype)
+        or not pd.api.types.is_numeric_dtype(model_frame[predictor])
+        or str(term).startswith(f"C({predictor})")
     )
-    ax.axhline(0, color="gray", linestyle=":", linewidth=0.8, alpha=0.7)
-    ax.axvline(0, color="gray", linestyle=":", linewidth=0.8, alpha=0.7)
-    ax.set_title(f"{outcome} vs {_term_to_readable(term)} (adjusted relationship)")
-    ax.set_xlabel(f"{_term_to_readable(term)}, adjusted for other predictors")
-    ax.set_ylabel(f"{outcome}, adjusted for other predictors")
+    if categorical:
+        categories = model_frame[predictor].dropna().drop_duplicates().tolist()
+        category_match = re.match(rf"C\({re.escape(str(predictor))}\)\[T\.(.*?)\]", str(term))
+        if category_match:
+            exposed = category_match.group(1)
+            reference = _reference_category(model_frame, predictor)
+            categories = [value for value in categories if str(value) in {str(reference), exposed}]
+        prediction_x = categories
+    else:
+        raw_x = pd.to_numeric(plot_data[predictor], errors="coerce").dropna()
+        prediction_x = np.linspace(raw_x.min(), raw_x.max(), 100)
+
+    prediction_data = pd.concat(
+        [model_frame.iloc[[0]].copy()] * len(prediction_x), ignore_index=True
+    )
+    for column in model_frame.columns:
+        if column in {outcome, predictor}:
+            continue
+        series = model_frame[column].dropna()
+        if series.empty:
+            continue
+        if pd.api.types.is_numeric_dtype(series) and not isinstance(series.dtype, pd.CategoricalDtype):
+            prediction_data[column] = series.median()
+        else:
+            prediction_data[column] = _reference_category(model_frame, column)
+    prediction_data[predictor] = prediction_x
+    prediction = model.get_prediction(prediction_data).summary_frame(alpha=0.05)
+
+    fig, ax = plt.subplots(figsize=(7.5, 5.0))
+    if categorical:
+        visible_data = plot_data[plot_data[predictor].astype(str).isin({str(value) for value in prediction_x})]
+        sns.stripplot(
+            data=visible_data, x=predictor, y=outcome, order=prediction_x,
+            jitter=False, ax=ax, color="#4C78A8", alpha=0.75, size=5,
+        )
+        observed_limits = ax.get_ylim()
+        positions = np.arange(len(prediction_x))
+        ax.errorbar(
+            positions, prediction["mean"],
+            yerr=np.vstack([
+                prediction["mean"] - prediction["mean_ci_lower"],
+                prediction["mean_ci_upper"] - prediction["mean"],
+            ]),
+            color="#B2182B", marker="o", linewidth=1.6, capsize=3,
+            label="Adjusted model estimate (95% CI)",
+        )
+        ax.set_ylim(observed_limits)
+    else:
+        sns.scatterplot(
+            data=plot_data, x=predictor, y=outcome, ax=ax,
+            alpha=0.85, edgecolor="white", s=36,
+        )
+        observed_xlim, observed_ylim = ax.get_xlim(), ax.get_ylim()
+        ax.plot(prediction_x, prediction["mean"], color="#B2182B", linewidth=1.6,
+                label="Adjusted model estimate")
+        ax.fill_between(
+            prediction_x, prediction["mean_ci_lower"], prediction["mean_ci_upper"],
+            color="#B2182B", alpha=0.16, linewidth=0,
+        )
+        # Confidence bands must not redefine the displayed range: limits stay
+        # based solely on the observed raw measurements.
+        ax.set_xlim(observed_xlim)
+        ax.set_ylim(observed_ylim)
+
+    ax.set_title(f"{outcome} vs {_term_to_readable(term)} (adjusted model fit)")
+    ax.set_xlabel(f"{predictor} (observed values)")
+    ax.set_ylabel(f"{outcome} (observed values)")
+    ax.legend(frameon=False)
     ax.grid(alpha=0.2)
     fig.tight_layout()
     return fig, plot_data
@@ -719,15 +787,15 @@ def _render_bivariate_ols_section(df, continuous_cols, categorical_cols, group_c
     """Render the bivariate OLS scatterplot section."""
     st.markdown("### Bivariate OLS")
 
-    v1, v2 = st.columns([1, 1], border=True, gap="small")
-    with v2:
+    right_col, left_col = st.columns([1, 1], border=True, gap="small")
+    with left_col:
         x_cols = st.multiselect("(X) Predictor variable(s)",
             options=continuous_cols,
             default=continuous_cols[:1],
             key="uniols_x_multiselect",
         )
 
-    with v1:
+    with right_col:
         possible_y = [col for col in continuous_cols if col not in x_cols]
         y_cols = st.multiselect("(Y) Outcome variable(s)",
             options=possible_y,
@@ -1026,7 +1094,7 @@ def _render_multivariable_ols_section(
     available_columns = list(dict.fromkeys(continuous_cols + categorical_cols))
 
     selector_left, selector_right = st.columns([1, 1],border=True,gap="small",)
-    with selector_left:
+    with selector_right:
         y_cols = st.multiselect("(Y) Outcome variable(s)",
             options=available_columns,
             placeholder="Select one or more outcomes",
@@ -1037,7 +1105,7 @@ def _render_multivariable_ols_section(
             ),
         )
 
-    with selector_right:
+    with selector_left:
         candidate_x = [col for col in available_columns if col not in y_cols]
         x_cols = st.multiselect("(X) Predictor variable(s)",
             options=candidate_x,
@@ -1129,8 +1197,8 @@ def _render_multivariable_ols_section(
             selection_mode="single",
             key="multiols_forest_layout",
             help=(
-                "Separate creates adjusted scatterplots for every outcome–primary-"
-                "predictor pair. Combined preserves the predictor-across-outcomes "
+            "Separate creates raw-value scatterplots with an adjusted model fit "
+                "for every outcome–primary-predictor pair. Combined preserves the predictor-across-outcomes "
                 "forest-plot view."
             ),
         )
@@ -1305,8 +1373,9 @@ def _render_multivariable_ols_section(
     else:
         st.caption(
             "Separate view: each outcome–primary-predictor pair is shown as an "
-            "adjusted scatterplot. These are partial-regression plots, so the "
-            "fitted slope equals the predictor's coefficient in the full model. "
+            "raw-value scatterplot with a model-adjusted fitted relationship. "
+            "The axes and points use the imported values; other predictors are "
+            "held constant for the red fitted line. "
             "Plots are grouped by outcome, with up to three predictors per row."
         )
 
@@ -1353,7 +1422,8 @@ def _render_multivariable_ols_section(
                     with plot_column:
                         term = coefficient["term"]
                         fig, partial_data = _plot_adjusted_scatter(
-                            results[outcome], outcome, term
+                            results[outcome], outcome, term,
+                            predictor=coefficient["predictor"],
                         )
                         if fig is None:
                             st.warning(
@@ -1389,9 +1459,10 @@ def _render_multivariable_ols_section(
                                         f"**{_term_to_readable(term)}** represents its "
                                         f"association with **{outcome}**, adjusted for "
                                         f"{adjusted_for}. "
-                                        "The lineear line is the adjusted linear relationship; "
-                                        "its slope equals the coefficient from the full "
-                                        "multivariable model."
+                                        "The points and axes show the original observed values. "
+                                        "The red line is the full model's adjusted relationship, "
+                                        "with the other numeric predictors held at their medians "
+                                        "and categorical predictors at their reference levels."
                             )
 
                             # st.markdown(

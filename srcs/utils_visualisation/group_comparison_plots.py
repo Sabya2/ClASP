@@ -487,7 +487,7 @@ def render_group_comparison_page(df, continuous_cols, group_col):
 
             **How the statistics work**
             - For each selected variable, the app prepares valid numeric data and removes missing or infinite values.
-            - Tests compare **independent groups**; this page does not perform paired or repeated-measures comparisons.
+            - Tests in the **Independent Groups** workflow compare unrelated observations; choose another analysis type above for paired or repeated measurements.
             - **Automatic:** selection is repeated for each outcome. Every group must have 3–5,000 non-constant observations and a Shapiro–Wilk p-value ≥ 0.05 to use the parametric route. If a check is unavailable or p < 0.05, the non-parametric route is used.
             - **Parametric:** compares group means. For two groups, CLASP uses Student's independent t-test when Levene's test supports equal variance and Welch's t-test otherwise. For three or more groups it uses ordinary one-way ANOVA or Welch's ANOVA by the same variance rule.
             - **Non-parametric:** compares ranks/distributional location. Two groups use Mann–Whitney U. Three or more groups use Kruskal–Wallis, followed by Dunn's pairwise comparisons.

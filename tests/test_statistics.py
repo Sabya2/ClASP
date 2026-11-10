@@ -10,6 +10,12 @@ from srcs.utils_visualisation.group_comparison_plots import (
     build_group_method_explanation,
     format_group_summary,
 )
+from srcs.utils_visualisation.repeated_measures_stats import (
+    RepeatedMeasuresValidationError,
+    run_mixed_anova,
+    run_repeated_measures,
+    wide_to_long,
+)
 from srcs.utils_visualisation.temporal_stats import (
     build_temporal_explanation,
     safe_temporal_filename,
@@ -112,6 +118,107 @@ def test_group_summary_explains_nonparametric_rank_interpretation():
     assert "Non-parametric (explicit override)" in explanation
     assert "compare ranks" in explanation
     assert "Dunn's comparisons" in explanation
+
+
+def test_two_time_repeated_matches_scipy_paired_t_reference():
+    before = np.array([10, 12, 9, 15, 11, 13], dtype=float)
+    after = np.array([12, 13, 11, 14, 14, 16], dtype=float)
+    df = pd.DataFrame({
+        "id": np.repeat(np.arange(6), 2), "time": ["pre", "post"] * 6,
+        "value": np.column_stack([before, after]).ravel(),
+    })
+    result = run_repeated_measures(
+        df, "id", "time", "value", ["pre", "post"], method="parametric"
+    )
+    reference = __import__("scipy").stats.ttest_rel(after, before)
+    assert result["n_included"] == 6
+    assert result["result"]["statistic"] == pytest.approx(reference.statistic)
+    assert result["result"]["p"] == pytest.approx(reference.pvalue)
+    assert result["result"]["mean_change"] == pytest.approx(np.mean(after - before))
+
+
+def test_repeated_measures_reports_incomplete_participants_and_uses_complete_pairs():
+    df = pd.DataFrame({
+        "id": [1, 1, 2, 2, 3], "time": ["a", "b", "a", "b", "a"],
+        "value": [1.0, 2.0, 2.0, 4.0, 9.0],
+    })
+    result = run_repeated_measures(df, "id", "time", "value", ["a", "b"], method="parametric")
+    assert result["n_included"] == 2
+    assert result["n_excluded_incomplete"] == 1
+    assert result["result"]["mean_change"] == pytest.approx(1.5)
+
+
+def test_duplicate_participant_time_is_rejected_without_aggregation():
+    df = pd.DataFrame({
+        "id": [1, 1, 1, 2, 2], "time": ["a", "a", "b", "a", "b"],
+        "value": [1, 2, 3, 4, 5],
+    })
+    with pytest.raises(RepeatedMeasuresValidationError, match="Duplicate participant/time"):
+        run_repeated_measures(df, "id", "time", "value")
+
+
+def test_three_time_repeated_anova_matches_statsmodels_reference():
+    from statsmodels.stats.anova import AnovaRM
+
+    values = np.array([
+        [8.0, 9.0, 12.0], [7.0, 8.5, 10.0], [9.0, 10.0, 13.0],
+        [6.0, 8.0, 9.0], [10.0, 10.5, 14.0], [7.5, 9.5, 11.0],
+    ])
+    df = pd.DataFrame({
+        "id": np.repeat(np.arange(len(values)), 3), "time": np.tile(["t0", "t1", "t2"], len(values)),
+        "value": values.ravel(),
+    })
+    result = run_repeated_measures(df, "id", "time", "value", method="parametric")
+    reference = AnovaRM(df, "value", "id", within=["time"]).fit().anova_table.iloc[0]
+    assert result["result"]["statistic"] == pytest.approx(reference["F Value"])
+    assert result["result"]["p_uncorrected"] == pytest.approx(reference["Pr > F"])
+    assert len(result["pairwise"]) == 3
+    assert all("p_corrected" in row for row in result["pairwise"])
+
+
+def test_mixed_anova_detects_known_group_by_time_interaction_with_unequal_groups():
+    rows = []
+    # Control is stable while treatment increases; deterministic residual
+    # variation keeps all ANOVA denominators estimable.
+    for group, size, change in [("control", 5, 0.2), ("treatment", 7, 4.0)]:
+        for subject in range(size):
+            identifier = f"{group}-{subject}"
+            baseline = 10 + subject * .4 + (subject % 2) * .15
+            rows.extend([
+                {"id": identifier, "group": group, "time": "pre", "value": baseline},
+                {"id": identifier, "group": group, "time": "post", "value": baseline + change + (subject % 3) * .08},
+            ])
+    df = pd.DataFrame(rows)
+    result = run_mixed_anova(df, "id", "group", "time", "value", ["pre", "post"])
+    interaction = next(row for row in result["effects"] if row["effect"] == "Group × Time")
+    assert result["group_sizes"] == {"control": 5, "treatment": 7}
+    assert interaction["p"] < 0.001
+    assert interaction["df1"] == pytest.approx(1)
+    assert interaction["df2"] == pytest.approx(10)
+    assert result["posthoc"]
+
+
+def test_mixed_design_rejects_group_switching_and_constant_transformation():
+    switching = pd.DataFrame({
+        "id": [1, 1, 2, 2], "group": ["a", "b", "a", "a"],
+        "time": [0, 1, 0, 1], "value": [1, 2, 3, 4],
+    })
+    with pytest.raises(RepeatedMeasuresValidationError, match="more than one group"):
+        run_mixed_anova(switching, "id", "group", "time", "value")
+
+    constant = pd.DataFrame({
+        "id": np.repeat(range(4), 2), "time": [0, 1] * 4, "value": [5.0] * 8,
+    })
+    with pytest.raises(RepeatedMeasuresValidationError, match="No usable observations"):
+        run_repeated_measures(constant, "id", "time", "value", transformation="z-score")
+
+
+def test_wide_conversion_uses_explicit_columns_and_preserves_missing_values():
+    wide = pd.DataFrame({"id": [1, 2], "group": ["a", "b"], "week0": [1.0, 2.0], "week4": [3.0, np.nan]})
+    long = wide_to_long(wide, "id", ["week0", "week4"], group_col="group")
+    assert list(long.columns) == ["id", "group", "time", "outcome"]
+    assert len(long) == 4
+    assert long["outcome"].isna().sum() == 1
 
 
 def test_temporal_bootstrap_edge_cases_and_participant_resampling():

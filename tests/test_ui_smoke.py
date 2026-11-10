@@ -65,6 +65,25 @@ def test_interactive_plots_page_renders_box_plot_mode():
     assert "Group variable" in [element.label for element in app.selectbox]
 
 
+def test_group_comparison_offers_all_three_analysis_designs():
+    df = pd.read_csv(PROJECT_ROOT / "tests/data/synthetic_clinical.csv")
+    app = AppTest.from_file(str(PROJECT_ROOT / "pages/GroupComparison.py"))
+    state = {
+        "df": df, "continuous_cols": ["outcome", "pre", "post"],
+        "categorical_cols": ["group"], "group_col": "group",
+        "participants_col": "participant_id",
+    }
+    for key, value in state.items():
+        app.session_state[key] = value
+    app.run(timeout=60)
+    selector = next(element for element in app.selectbox if element.label == "Analysis Type")
+    assert list(selector.options) == [
+        "Independent Groups", "Paired / Repeated Measures", "Group × Time (Mixed Design)"
+    ]
+    assert selector.value == "Independent Groups"
+    assert not app.exception
+
+
 @pytest.mark.parametrize(
     "mode, expected_subheader",
     [

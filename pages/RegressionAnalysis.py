@@ -82,7 +82,7 @@ with st.expander("How this page works and what to expect", expanded=False):
 
             #### What you receive
 
-            - **Separate** plots (default): an adjusted scatterplot for every outcome–primary-predictor pair. Plots are grouped by outcome with up to two predictors per row, and each fitted slope equals the adjusted coefficient from the full model.
+            - **Separate** plots (default): a scatterplot of the original observed outcome and predictor values for every pair. The red fitted relationship is adjusted using the full model while other predictors are held constant; it does not replace the axis values with residualized values.
             - **Combined** forest plots: one clear summary card per primary predictor, compared across all outcomes, with detailed estimates collapsed underneath.
             - Plot-specific interpretation text in a visible box beneath every plot.
             - An optional outcome-by-predictor beta heatmap.
